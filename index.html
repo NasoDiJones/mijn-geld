@@ -625,12 +625,22 @@
           <div id="sync-logged-out">
             <p class="text-xs text-slate-400 mb-2">Log in om je gegevens veilig online te bewaren en te delen met je partner.</p>
             <input type="email" id="sync-email" placeholder="jouw@email.nl" autocomplete="email" class="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl mb-2">
-            <button onclick="mgSyncSendCode()" class="w-full py-3 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable">Stuur inlogcode</button>
-            <div id="sync-code-box" class="hidden mt-3">
-              <p class="text-xs text-slate-400 mb-2">Vul de 6-cijferige code uit de e-mail in (of tik op de link in de mail).</p>
-              <input type="text" id="sync-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" class="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl mb-2 text-center tabular-nums">
-              <button onclick="mgSyncVerifyCode()" class="w-full py-3 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable">Inloggen</button>
+            <div class="relative mb-1">
+              <input type="password" id="sync-password" placeholder="Wachtwoord (min. 8 tekens)" autocomplete="current-password" minlength="8" class="w-full px-3 py-2.5 pr-12 bg-white border border-slate-200 rounded-xl">
+              <button type="button" id="sync-pw-toggle" onclick="mgSyncTogglePw('sync-password',this)" class="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-sm text-slate-500" aria-label="Toon wachtwoord">👁️</button>
             </div>
+            <p id="sync-msg" class="hidden text-xs mb-2 mt-1"></p>
+            <button onclick="mgSyncLogin()" class="w-full py-3 mt-1 bg-brand-600 text-white font-semibold rounded-xl pressable mb-2">Inloggen</button>
+            <button onclick="mgSyncSignUp()" class="w-full py-3 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable mb-2">Account aanmaken</button>
+            <button onclick="mgSyncForgot()" class="w-full py-2 text-xs text-slate-500 underline">Wachtwoord vergeten?</button>
+          </div>
+          <div id="sync-recovery" class="hidden">
+            <p class="text-xs text-slate-500 mb-2">Kies een nieuw wachtwoord (min. 8 tekens).</p>
+            <div class="relative mb-2">
+              <input type="password" id="sync-new-password" placeholder="Nieuw wachtwoord" autocomplete="new-password" minlength="8" class="w-full px-3 py-2.5 pr-12 bg-white border border-slate-200 rounded-xl">
+              <button type="button" onclick="mgSyncTogglePw('sync-new-password',this)" class="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-sm text-slate-500" aria-label="Toon wachtwoord">👁️</button>
+            </div>
+            <button onclick="mgSyncSetNewPassword()" class="w-full py-3 bg-brand-600 text-white font-semibold rounded-xl pressable">Wachtwoord opslaan</button>
           </div>
           <div id="sync-logged-in" class="hidden">
             <p class="text-xs text-slate-400 mb-2">Ingelogd als <span id="sync-user-email"></span></p>

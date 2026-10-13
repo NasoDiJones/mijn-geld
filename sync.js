@@ -25,8 +25,10 @@
   function renderUi() {
     var out = $('sync-logged-out'), inn = $('sync-logged-in');
     if (!out || !inn) return;
+    var rec = $('sync-recovery'), inRec = recovering && !!user;
+    if (rec) rec.classList.toggle('hidden', !inRec);
     out.classList.toggle('hidden', !!user);
-    inn.classList.toggle('hidden', !user);
+    inn.classList.toggle('hidden', !user || inRec);
     if (user && $('sync-user-email')) $('sync-user-email').textContent = user.email || '';
     if (!user) setStatus('');
   }
@@ -125,24 +127,70 @@
     timer = setTimeout(function () { safe(upload); }, DEBOUNCE_MS);
   };
 
-  window.mgSyncSendCode = async function () {
-    if (!client) { alert('Inloggen is nu niet beschikbaar (offline?).'); return; }
+  var recovering = false;
+  var APP_URL = 'https://nasodijones.github.io/mijn-geld/';
+  function redirectUrl() { return /nasodijones\.github\.io/.test(location.host) ? APP_URL : location.origin + location.pathname; }
+  function msg(text, kind) {
+    var el = $('sync-msg'); if (!el) { if (text) alert(text); return; }
+    el.textContent = text || '';
+    el.className = 'text-xs mb-2 mt-1 ' + (kind === 'ok' ? 'text-emerald-600' : 'text-rose-600') + (text ? '' : ' hidden');
+  }
+  function nlError(e) {
+    var m = ((e && (e.code || '')) + ' ' + (e && e.message || '')).toLowerCase();
+    var st = e && e.status;
+    if (/email.?not.?confirmed/.test(m)) return 'Je e-mail is nog niet bevestigd. Klik eerst op de link in de bevestigingsmail.';
+    if (/invalid.?(login.?)?credentials|invalid_grant/.test(m)) return 'E-mailadres of wachtwoord klopt niet.';
+    if (st === 429 || /rate.?limit|too many|over_email_send|security purposes/.test(m)) return 'Te veel pogingen. Wacht een paar minuten en probeer het opnieuw.';
+    if (/already.?registered|user_already_exists|already exists/.test(m)) return 'Er bestaat al een account met dit e-mailadres. Log in of kies "Wachtwoord vergeten".';
+    if (/weak|password should|at least/.test(m)) return 'Wachtwoord is te zwak. Gebruik minimaal 8 tekens.';
+    if (/same.?password|different from the old/.test(m)) return 'Kies een ander wachtwoord dan je oude.';
+    if (/fetch|network/.test(m)) return 'Geen verbinding. Controleer je internet.';
+    return 'Er ging iets mis: ' + (e && e.message || 'onbekende fout');
+  }
+  function creds(needPw) {
+    if (!client) { msg('Inloggen is nu niet beschikbaar (offline?).'); return null; }
     var email = ($('sync-email').value || '').trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) { alert('Vul een geldig e-mailadres in.'); return; }
-    var r = await client.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (r.error) { alert('Versturen mislukt: ' + r.error.message); return; }
-    $('sync-code-box').classList.remove('hidden');
-    toast('Code verstuurd naar ' + email);
+    if (!EMAIL_RE.test(email)) { msg('Vul een geldig e-mailadres in.'); return null; }
+    var pw = $('sync-password') ? $('sync-password').value : '';
+    if (needPw && (pw || '').length < 8) { msg('Wachtwoord moet minimaal 8 tekens zijn.'); return null; }
+    return { email: email, password: pw };
+  }
+  window.mgSyncTogglePw = function (id, btn) {
+    var i = $(id); if (!i) return;
+    var show = i.type === 'password'; i.type = show ? 'text' : 'password';
+    if (btn) { btn.textContent = show ? '🙈' : '👁️'; btn.setAttribute('aria-label', show ? 'Verberg wachtwoord' : 'Toon wachtwoord'); }
   };
-
-  window.mgSyncVerifyCode = async function () {
-    if (!client) return;
-    var email = ($('sync-email').value || '').trim().toLowerCase();
-    var code = ($('sync-code').value || '').replace(/\s/g, '');
-    if (!code) { alert('Vul de code uit de e-mail in.'); return; }
-    var r = await client.auth.verifyOtp({ email: email, token: code, type: 'email' });
-    if (r.error) { alert('Code klopt niet of is verlopen. Probeer opnieuw.'); return; }
+  window.mgSyncLogin = async function () {
+    var c = creds(true); if (!c) return; msg('');
+    var r = await client.auth.signInWithPassword({ email: c.email, password: c.password });
+    if (r.error) { msg(nlError(r.error)); return; }
+    $('sync-password').value = '';
     toast('Ingelogd ✓');
+  };
+  window.mgSyncSignUp = async function () {
+    var c = creds(true); if (!c) return; msg('');
+    var r = await client.auth.signUp({ email: c.email, password: c.password, options: { emailRedirectTo: redirectUrl() } });
+    if (r.error) { msg(nlError(r.error)); return; }
+    var d = r.data || {};
+    if (d.user && Array.isArray(d.user.identities) && d.user.identities.length === 0) { msg('Er bestaat al een account met dit e-mailadres. Log in of kies "Wachtwoord vergeten".'); return; }
+    if (d.session) { toast('Account aangemaakt ✓'); return; }
+    msg('Bevestig je e-mail via de link in je mail en log daarna hier in met je wachtwoord.', 'ok');
+  };
+  window.mgSyncForgot = async function () {
+    var c = creds(false); if (!c) return; msg('');
+    var r = await client.auth.resetPasswordForEmail(c.email, { redirectTo: redirectUrl() });
+    if (r.error) { msg(nlError(r.error)); return; }
+    msg('Als dit e-mailadres een account heeft, staat er een link in je mail. Open die en kies een nieuw wachtwoord.', 'ok');
+  };
+  window.mgSyncSetNewPassword = async function () {
+    if (!client) return;
+    var pw = $('sync-new-password').value || '';
+    if (pw.length < 8) { alert('Wachtwoord moet minimaal 8 tekens zijn.'); return; }
+    var r = await client.auth.updateUser({ password: pw });
+    if (r.error) { alert(nlError(r.error)); return; }
+    $('sync-new-password').value = '';
+    recovering = false; renderUi();
+    toast('Nieuw wachtwoord opgeslagen ✓');
   };
 
   window.mgSyncInvite = async function () {
@@ -172,7 +220,9 @@
     client = lib.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'mijnGeldApp.auth' }
     });
+    if (/type=recovery/.test(location.hash || '') || /type=recovery/.test(location.search || '')) recovering = true;
     client.auth.onAuthStateChange(function (event, session) {
+      if (event === 'PASSWORD_RECOVERY') { recovering = true; if (typeof openModal === 'function') { try { setTimeout(function () { openModal('settings'); }, 0); } catch (e) {} } }
       var was = user;
       user = session ? session.user : null;
       renderUi();
