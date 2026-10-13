@@ -201,6 +201,12 @@
     html[data-theme=dark] .theme-seg { background:#1e293b; }
     html[data-theme=dark] .theme-seg button { color:#94a3b8; }
     html[data-theme=dark] .theme-seg button[aria-pressed=true] { background:#334155; color:#f8fafc; }
+      .search-info-row:not(.hidden){display:flex;justify-content:space-between;align-items:baseline;gap:8px;white-space:nowrap}
+    #search-count{overflow:hidden;text-overflow:ellipsis}
+    .search-total{font-weight:600;font-variant-numeric:tabular-nums}
+    .search-total .pos{color:#059669}.search-total .neg{color:#e11d48}.search-total .sub{font-weight:400;color:#94a3b8;margin-right:6px}
+    html[data-theme=dark] .search-total .pos{color:#34d399}html[data-theme=dark] .search-total .neg{color:#fb7185}html[data-theme=dark] .search-total .sub{color:#64748b}
+    body.searching #transactions-list{min-height:100vh}
   </style>
   <script>
     (function(){try{var t=localStorage.getItem('mijnGeld.theme')||'auto';var d=t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
@@ -315,7 +321,7 @@
                  class="search-input w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 shadow-card focus:outline-none focus:ring-2 focus:ring-brand-500/40">
           <button id="search-clear" onclick="clearSearch()" aria-label="Zoekopdracht wissen" class="hidden absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs pressable">✕</button>
         </div>
-        <p id="search-info" class="hidden text-xs text-slate-400 px-0.5"></p>
+        <div id="search-info" class="hidden search-info-row text-xs text-slate-400 px-0.5"><span id="search-count"></span><span id="search-total" class="search-total"></span></div>
         <div id="transactions-list" class="space-y-2.5"></div>
         <div id="no-transactions" class="hidden text-center py-14">
           <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-slate-200/60 flex items-center justify-center text-2xl">💸</div>

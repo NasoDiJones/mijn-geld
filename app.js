@@ -717,7 +717,18 @@ function renderTransactions() {
   const info = document.getElementById('search-info');
   if (info) {
     info.classList.toggle('hidden', !query);
-    info.textContent = query ? (sorted.length === 1 ? '1 resultaat in alle periodes' : `${sorted.length} resultaten in alle periodes`) : '';
+    document.getElementById('search-count').textContent = query ? (sorted.length === 1 ? '1 resultaat' : `${sorted.length} resultaten`) : '';
+    const totEl = document.getElementById('search-total');
+    if (query && sorted.length) {
+      const inc = sorted.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const out = sorted.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const net = inc - out;
+      const sub = inc > 0 && out > 0 ? `<span class="sub">in ${formatMoney(inc)} / uit ${formatMoney(out)}</span>` : '';
+      totEl.innerHTML = sub + `<span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${formatMoney(Math.abs(net))}</span>`;
+    } else totEl.innerHTML = '';
+  }
+  document.body.classList.toggle('searching', !!query);
+  {
   }
   const nominalEnd = getPeriodEnd(state.lastPeriodStart);
   document.getElementById('period-label').textContent = isNewPeriodDue()
