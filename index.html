@@ -318,7 +318,7 @@
   </div>
 
   <!-- ==================== BACKDROP ==================== -->
-  <div id="modal-backdrop" class="backdrop fixed inset-0 bg-black/40 z-40" onclick="closeModal()"></div>
+  <div id="modal-backdrop" class="backdrop fixed inset-0 bg-black/40 z-40" onclick="cancelModal()"></div>
 
   <!-- ==================== MODALS ==================== -->
   <!-- Add Expense -->
@@ -330,7 +330,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900">Uitgave toevoegen</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <form onsubmit="addTransaction(event, 'expense')" class="space-y-4">
           <div>
@@ -379,7 +379,7 @@
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider" id="edit-transaction-type">Uitgave</p>
             <h3 class="text-lg font-bold text-slate-900">Transactie bewerken</h3>
           </div>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <form id="edit-transaction-form" onsubmit="saveEditTransaction(event)" class="space-y-4">
           <div>
@@ -434,7 +434,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900">Inkomst toevoegen</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <form onsubmit="addTransaction(event, 'income')" class="space-y-4">
           <div>
@@ -473,7 +473,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900">Nieuw potje</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <form onsubmit="addPot(event)" class="space-y-4">
           <div>
@@ -519,7 +519,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900">Nieuw spaardoel</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <form onsubmit="addGoal(event)" class="space-y-4">
           <div>
@@ -559,7 +559,7 @@
       </div>
       <div class="px-5 pt-2 pb-2 flex items-center justify-between">
         <h3 class="text-lg font-bold text-slate-900">Categorieën</h3>
-        <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
       </div>
       <div class="px-5 overflow-y-auto flex-1 space-y-1.5 pb-3" id="categories-list"></div>
       <div class="px-5 pb-6 pt-2 border-t border-slate-100">
@@ -588,7 +588,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900">Instellingen</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <div class="bg-slate-50 rounded-2xl p-4 mb-2">
           <div class="flex items-center justify-between gap-3">
@@ -665,7 +665,7 @@
       <div class="px-5 pt-2 pb-6">
         <div class="flex items-center justify-between mb-5">
           <h3 class="text-lg font-bold text-slate-900" id="pot-action-title">Potje</h3>
-          <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
         </div>
         <div class="space-y-2">
           <button onclick="openAddToPot()" class="w-full py-3.5 bg-brand-50 text-brand-700 font-semibold rounded-2xl pressable">Geld toevoegen</button>
@@ -686,7 +686,7 @@
         <div class="px-5 pt-2 pb-3">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-bold text-slate-900">Nieuwe periode</h3>
-            <button type="button" onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+            <button type="button" onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
           </div>
           <p class="text-sm text-slate-500 mt-1" id="new-period-subtitle"></p>
         </div>
@@ -712,7 +712,7 @@
           <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Periode</p>
           <h3 class="text-lg font-bold text-slate-900" id="history-detail-title"></h3>
         </div>
-        <button onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
       </div>
       <div class="px-5 overflow-y-auto flex-1 pb-6" id="history-detail-body"></div>
     </div>
@@ -726,7 +726,7 @@
       </div>
       <div class="px-5 pt-2 pb-3 flex items-center justify-between">
         <h3 class="text-lg font-bold text-slate-900">Saldo-opbouw</h3>
-        <button type="button" onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        <button type="button" onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
       </div>
       <div class="px-5 overflow-y-auto flex-1 pb-6" id="balance-body"></div>
     </div>
@@ -743,7 +743,7 @@
           <h3 class="text-lg font-bold text-slate-900">Vaste lasten</h3>
           <p class="text-xs text-slate-400 mt-0.5" id="recurring-period"></p>
         </div>
-        <button type="button" onclick="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        <button type="button" onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
       </div>
       <div class="px-5 overflow-y-auto flex-1 pb-3" id="recurring-body"></div>
       <div class="px-5 pb-6 pt-3 border-t border-slate-100 space-y-2">

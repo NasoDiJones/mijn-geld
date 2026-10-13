@@ -866,11 +866,34 @@ function openModal(name) {
   }, 280);
 }
 
-function closeModal() {
+// Sluiten na opslaan/bewerken: terug naar boven. Annuleren (✕ / achtergrond): positie behouden.
+function cancelModal() { closeModal({ keepScroll: true }); }
+
+function closeModal(opts) {
   document.getElementById('modal-backdrop').classList.remove('open');
-  document.querySelectorAll('.modal').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.modal').forEach(m => {
+    m.classList.remove('open');
+    m.querySelectorAll('.overflow-y-auto, .overflow-auto').forEach(el => { el.scrollTop = 0; });
+  });
   currentPotId = null;
+  if (!(opts && opts.keepScroll)) scrollToTop(true);
 }
+
+function scrollToTop(smooth) {
+  const go = () => { try {
+    const behavior = smooth && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'smooth' : 'auto';
+    try { window.scrollTo({ top: 0, left: 0, behavior }); } catch (e) { window.scrollTo(0, 0); }
+    const se = document.scrollingElement || document.documentElement;
+    if (!smooth) { se.scrollTop = 0; document.body.scrollTop = 0; }
+  } catch (e) { /* geen scroll-ondersteuning */ } };
+  // Na de re-render (render() volgt vaak direct op closeModal) scrollen.
+  const raf = window.requestAnimationFrame || (f => setTimeout(f, 16));
+  raf(() => raf(go));
+}
+
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+window.addEventListener('pageshow', () => scrollToTop(false));
+window.addEventListener('load', () => scrollToTop(false));
 
 // ==================== ACTIONS ====================
 function addTransaction(e, type) {
@@ -1945,6 +1968,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     }
     reloading = true;
     sessionStorage.setItem('swReloadAt', String(Date.now()));
+    try { window.scrollTo(0, 0); } catch (e) {}
     location.reload();
   };
 
