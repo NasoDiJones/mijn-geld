@@ -93,7 +93,7 @@
       if (hid.error) throw hid.error;
       if (meta.householdId !== hid.data) { meta = { householdId: hid.data, initialized: false }; writeMeta(); }
       var remote = await fetchRemote();
-      if (meta.initialized) { await pullOrPush(remote); return; }
+      if (meta.initialized) { await pullOrPush(remote); refreshLast(); return; }
       var local = localData();
       if (!remote || !hasData(remote.data)) {
         if (hasData(local)) await upload();
@@ -107,6 +107,7 @@
       if (remote && !meta.lastSyncedAt) meta.lastSyncedAt = remote.updated_at;
       meta.initialized = true; writeMeta();
       setStatus('ok');
+      refreshLast();
     } catch (e) { fail(e); }
     finally { busy = false; }
   }
@@ -203,6 +204,81 @@
     alert(email + ' is uitgenodigd. Laat diegene de app openen en inloggen met dit e-mailadres; jullie delen dan dezelfde gegevens.');
   };
 
+  // ---- Cloud back-ups ----
+  var DAYS = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
+  var MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  function fmtBackup(iso) {
+    var d = new Date(iso); if (isNaN(d)) return '';
+    var p = {};
+    try {
+      new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    } catch (e) { p = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), hour: d.getHours(), minute: d.getMinutes() }; }
+    var wd = new Date(Date.UTC(+p.year, +p.month - 1, +p.day)).getUTCDay();
+    var pad = function (n) { return ('0' + (+n % 24)).slice(-2); };
+    return DAYS[wd] + ' ' + (+p.day) + ' ' + MONTHS[+p.month - 1] + ' ' + pad(p.hour) + ':' + ('0' + (+p.minute)).slice(-2);
+  }
+  function fmtSize(b) { b = +b || 0; return b < 1024 ? b + ' B' : (b / 1024).toFixed(b < 10240 ? 1 : 0).replace('.', ',') + ' KB'; }
+  function isMissing(e) {
+    var m = ((e && e.code) || '') + ' ' + ((e && e.message) || '');
+    return /PGRST202|42883|42P01|PGRST205|could not find|does not exist|schema cache/i.test(m);
+  }
+  var backups = null;
+  async function loadBackups() {
+    var r = await client.rpc('list_backups');
+    if (r.error) throw r.error;
+    backups = r.data || [];
+    return backups;
+  }
+  function setLast(text) { var el = $('backup-last'); if (el) el.textContent = text; }
+  async function refreshLast() {
+    if (!client || !user) return;
+    try {
+      var list = await loadBackups();
+      setLast(list.length ? 'Laatste back-up: ' + fmtBackup(list[0].created_at) : 'Laatste back-up: nog geen');
+    } catch (e) { setLast(isMissing(e) ? 'Back-ups nog niet ingesteld' : 'Laatste back-up: onbekend'); }
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function renderBackups(text) {
+    var el = $('backups-list'); if (!el) return;
+    if (text) { el.innerHTML = '<p class="text-sm text-slate-500 text-center py-6">' + esc(text) + '</p>'; return; }
+    if (!backups || !backups.length) { el.innerHTML = '<p class="text-sm text-slate-500 text-center py-6">Nog geen back-ups. De eerste wordt vannacht gemaakt.</p>'; return; }
+    el.innerHTML = backups.map(function (b) {
+      return '<button type="button" data-backup-id="' + esc(b.id) + '" onclick="mgBackupRestore(' + JSON.stringify(String(b.id)).replace(/"/g, '&quot;') + ')" class="w-full flex items-center justify-between px-4 py-3 bg-slate-50 rounded-xl pressable text-left">' +
+        '<span class="font-semibold text-slate-800">' + esc(fmtBackup(b.created_at)) + '</span>' +
+        '<span class="text-xs text-slate-400">' + esc(fmtSize(b.size)) + '</span></button>';
+    }).join('');
+  }
+  window.mgBackupOpen = async function () {
+    if (!client || !user) return;
+    renderBackups('Laden…');
+    if (typeof openModal === 'function') openModal('backups');
+    try { await loadBackups(); renderBackups(); refreshLast(); }
+    catch (e) { renderBackups(isMissing(e) ? 'Back-ups nog niet ingesteld' : nlError(e)); if (isMissing(e)) setLast('Back-ups nog niet ingesteld'); }
+  };
+  window.mgBackupRestore = async function (id) {
+    if (!client || !user || busy) return;
+    var b = (backups || []).filter(function (x) { return String(x.id) === String(id); })[0];
+    var label = b ? fmtBackup(b.created_at) : '';
+    if (!confirm('Back-up van ' + label + ' terugzetten?\n\nHuidige gegevens worden vervangen; er wordt eerst een kopie gemaakt.')) return;
+    busy = true; clearTimeout(timer);
+    try {
+      setStatus('busy');
+      var r = await client.rpc('restore_backup', { backup_id: Number(id) });
+      if (r.error) throw r.error;
+      var remote = await fetchRemote();
+      if (remote && remote.data) applyRemote(remote.data);
+      meta.dirty = false; meta.lastSyncedAt = remote ? remote.updated_at : meta.lastSyncedAt; writeMeta();
+      setStatus('ok');
+      if (typeof closeModal === 'function') closeModal();
+      toast('Back-up teruggezet ✓');
+      refreshLast();
+    } catch (e) {
+      fail(e);
+      alert(isMissing(e) ? 'Back-ups nog niet ingesteld' : 'Terugzetten mislukt: ' + nlError(e));
+    } finally { busy = false; }
+  };
+
   window.mgSyncNow = function () { if (meta.dirty) return safe(upload); return syncNow(); };
 
   window.mgSyncLogout = async function () {
@@ -233,6 +309,6 @@
     window.addEventListener('offline', function () { if (user) setStatus('offline'); });
   }
 
-  window.__mgSync = { meta: function () { return meta; }, status: function () { return status; }, syncNow: syncNow };
+  window.__mgSync = { meta: function () { return meta; }, status: function () { return status; }, syncNow: syncNow, fmtBackup: fmtBackup };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

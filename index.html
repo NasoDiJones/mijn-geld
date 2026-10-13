@@ -652,10 +652,29 @@
             <input type="email" id="sync-invite-email" placeholder="partner@email.nl" class="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl mb-2">
             <button onclick="mgSyncInvite()" class="w-full py-3 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable mb-2">Uitnodigen</button>
             <button onclick="mgSyncNow()" class="w-full py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl pressable mb-2">🔄 Nu synchroniseren</button>
+            <p id="backup-last" class="text-xs text-slate-400 mb-1">Laatste back-up: …</p>
+            <button onclick="mgBackupOpen()" class="w-full py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl pressable mb-2">🗄️ Back-up terugzetten</button>
             <button onclick="mgSyncLogout()" class="w-full py-3 bg-rose-50 text-rose-600 font-semibold rounded-xl pressable">Uitloggen</button>
           </div>
         </div>
         <p class="text-xs text-slate-400 mt-5 text-center">Alles wordt lokaal opgeslagen in je browser.<br>Inloggen is optioneel.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Back-ups -->
+  <div id="modal-backups" data-no-autofocus class="modal fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto">
+    <div class="bg-white rounded-t-3xl shadow-2xl safe-bottom flex flex-col">
+      <div class="flex justify-center pt-3 pb-1">
+        <div class="w-10 h-1 rounded-full bg-slate-200"></div>
+      </div>
+      <div class="px-5 pt-2 pb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-bold text-slate-900">Back-up terugzetten</h3>
+          <button type="button" onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        </div>
+        <p class="text-xs text-slate-400 mb-3">Elke nacht om 03:00 wordt automatisch een back-up gemaakt. De laatste 30 dagen worden bewaard.</p>
+        <div id="backups-list" class="space-y-2"></div>
       </div>
     </div>
   </div>
