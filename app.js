@@ -855,6 +855,8 @@ function openModal(name) {
   const backdrop = document.getElementById('modal-backdrop');
   const modal = document.getElementById(`modal-${name}`);
   backdrop.classList.add('open');
+  modal.scrollTop = 0;
+  modal.querySelectorAll('*').forEach(el => { if (el.scrollTop) el.scrollTop = 0; });
   modal.classList.add('open');
   haptic(6);
   if (name === 'categories') renderCategoriesList();

@@ -20,6 +20,10 @@
       overscroll-behavior: none;
       background: #f1f5f9;
     }
+    /* v19: sheets nooit hoger dan het scherm, scrollbaar, kop met ✕ blijft zichtbaar */
+    .modal { max-height: calc(100vh - 12px); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px); display: flex; flex-direction: column; }
+    .modal > div { max-height: calc(100vh - 12px); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-bottom: env(safe-area-inset-bottom, 0px); }
+    .modal > div > .px-5 > .flex.items-center.justify-between:first-child { position: sticky; top: 0; z-index: 5; background: #fff; padding-top: 6px; padding-bottom: 6px; }
     /* Bottom sheet met lichte veer */
     .modal {
       transform: translateY(110%);
