@@ -207,9 +207,9 @@
     .search-total .pos{color:#059669}.search-total .neg{color:#e11d48}.search-total .sub{font-weight:400;color:#94a3b8;margin-right:6px}
     html[data-theme=dark] .search-total .pos{color:#34d399}html[data-theme=dark] .search-total .neg{color:#fb7185}html[data-theme=dark] .search-total .sub{color:#64748b}
     body.searching #transactions-list{min-height:100vh}
-    /* v23: kop echt vast (position:fixed) – sticky werd op iOS-PWA losgelaten */
-    #app-header { position: fixed !important; top: 0; left: 0; right: 0; margin: 0 auto; max-width: 32rem; z-index: 30; }
-    #app { padding-top: var(--hdr-h, 250px); }
+    /* v24: kop scrollt gewoon mee weg (statisch); alleen status-cover blijft vast */
+    #app-header { position: relative !important; top: auto; z-index: 30; }
+    #app { padding-top: 0 !important; }
     html[data-theme=dark] #app-header .hdr-safe { background:#0f172a; }
   </style>
   <script>
@@ -931,8 +931,5 @@
   <script src="app.js"></script>
   <script src="vendor/supabase.js" defer></script>
   <script src="sync.js" defer></script>
-<script>(function(){function u(){var h=document.getElementById('app-header');if(h)document.documentElement.style.setProperty('--hdr-h',Math.ceil(h.getBoundingClientRect().height)+'px');}
-function init(){u();var h=document.getElementById('app-header');if(h&&window.ResizeObserver)new ResizeObserver(u).observe(h);window.addEventListener('resize',u);window.addEventListener('orientationchange',function(){setTimeout(u,300)});}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();})();</script>
 </body>
 </html>
