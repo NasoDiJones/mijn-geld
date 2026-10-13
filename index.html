@@ -150,7 +150,61 @@
     .app-header { transform: none !important; animation: none !important; }
     .hdr-label { color: #94a3b8 !important; opacity: 1 !important; -webkit-font-smoothing: antialiased; }
     .hdr-title { color: #ffffff !important; opacity: 1 !important; -webkit-font-smoothing: antialiased; background: none !important; -webkit-text-fill-color: #ffffff; }
+    /* ===== v21: donkere modus ===== */
+    :root { --mg-bg:#f1f5f9; --mg-card:#ffffff; --mg-border:#e2e8f0; --mg-text:#1e293b; --mg-muted:#94a3b8; --mg-grid:#f1f5f9; }
+    html.theme-anim body, html.theme-anim body * { transition: background-color .3s ease, border-color .3s ease, color .3s ease, fill .3s ease, stroke .3s ease !important; }
+    html[data-theme=dark] { color-scheme: dark; --mg-bg:#0b1220; --mg-card:#1e293b; --mg-border:#334155; --mg-text:#e2e8f0; --mg-muted:#94a3b8; --mg-grid:#334155; }
+    html[data-theme=dark] body { color: #e2e8f0; }
+    html[data-theme=dark] #app { background: radial-gradient(1200px 600px at 50% -200px, #1e1b4b 0%, #0b1220 55%), #0b1220 !important; }
+    html[data-theme=dark] .bg-white { background-color: #1e293b !important; }
+    html[data-theme=dark] .bg-slate-50 { background-color: #0f172a !important; }
+    html[data-theme=dark] .modal .bg-slate-50 { background-color: #0f172a !important; }
+    html[data-theme=dark] .bg-slate-100 { background-color: #273449 !important; }
+    html[data-theme=dark] .bg-slate-200, html[data-theme=dark] .bg-slate-200\/60, html[data-theme=dark] .bg-slate-200\/80 { background-color: #334155 !important; }
+    html[data-theme=dark] .bg-slate-300 { background-color: #475569 !important; }
+    html[data-theme=dark] .text-slate-900, html[data-theme=dark] .text-slate-800 { color: #e2e8f0 !important; }
+    html[data-theme=dark] .text-slate-700, html[data-theme=dark] .text-slate-600 { color: #cbd5e1 !important; }
+    html[data-theme=dark] .text-slate-500 { color: #a1aec0 !important; }
+    html[data-theme=dark] .text-slate-400 { color: #94a3b8 !important; }
+    html[data-theme=dark] .text-slate-300 { color: #64748b !important; }
+    html[data-theme=dark] .border-slate-100, html[data-theme=dark] .border-slate-100\/60, html[data-theme=dark] .border-slate-100\/80, html[data-theme=dark] .border-slate-200 { border-color: #334155 !important; }
+    html[data-theme=dark] .divide-slate-200\/70 > * + * { border-color: #334155 !important; }
+    html[data-theme=dark] .bg-brand-50 { background-color: rgba(99,102,241,.18) !important; }
+    html[data-theme=dark] .from-brand-50 { --tw-gradient-from: rgba(99,102,241,.22) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important; }
+    html[data-theme=dark] .to-brand-100 { --tw-gradient-to: rgba(99,102,241,.32) !important; }
+    html[data-theme=dark] .text-brand-700, html[data-theme=dark] .text-brand-600 { color: #a5b4fc !important; }
+    html[data-theme=dark] .bg-rose-50 { background-color: rgba(244,63,94,.15) !important; }
+    html[data-theme=dark] .text-rose-600 { color: #fb7185 !important; }
+    html[data-theme=dark] .bg-emerald-50 { background-color: rgba(16,185,129,.15) !important; }
+    html[data-theme=dark] .text-emerald-600 { color: #34d399 !important; }
+    html[data-theme=dark] .bg-amber-50 { background-color: rgba(245,158,11,.15) !important; }
+    html[data-theme=dark] .text-amber-600 { color: #fbbf24 !important; }
+    html[data-theme=dark] input, html[data-theme=dark] select, html[data-theme=dark] textarea { color: #e2e8f0; }
+    html[data-theme=dark] input::placeholder, html[data-theme=dark] textarea::placeholder { color: #64748b; }
+    html[data-theme=dark] .modal input.bg-white, html[data-theme=dark] .modal select.bg-white { background-color: #0f172a !important; }
+    html[data-theme=dark] .modal .bg-slate-50 input.bg-white, html[data-theme=dark] .modal .bg-slate-50 select.bg-white { background-color: #1e293b !important; }
+    html[data-theme=dark] .modal > div > .px-5 > .flex.items-center.justify-between:first-child { background: #1e293b; }
+    html[data-theme=dark] .modal::after { background: #1e293b; }
+    html[data-theme=dark] .modal > div { box-shadow: 0 -10px 40px rgba(0,0,0,.5); }
+    html[data-theme=dark] .tab-active { background: #334155; color: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+    html[data-theme=dark] .glass-banner { background: rgba(30,41,59,.82); border-color: rgba(51,65,85,.9); }
+    html[data-theme=dark] .shadow-card { box-shadow: 0 1px 2px rgba(0,0,0,.35) !important; }
+    html[data-theme=dark] #toast { background-color: #e2e8f0 !important; color: #0f172a !important; }
+    html[data-theme=dark] svg [stroke="#f1f5f9"], html[data-theme=dark] svg [stroke="#e2e8f0"] { stroke: #334155; }
+    html[data-theme=dark] svg [fill="#eef2ff"] { fill: rgba(99,102,241,.22); }
+    html[data-theme=dark] svg [fill="#4338ca"] { fill: #a5b4fc; }
+    html[data-theme=dark] svg [fill="#059669"] { fill: #34d399; }
+    html[data-theme=dark] .backdrop { background-color: rgba(0,0,0,.6); }
+    .theme-seg { display:flex; gap:4px; padding:4px; border-radius:12px; background:#e2e8f0; }
+    .theme-seg button { flex:1; padding:8px 4px; border-radius:9px; font-size:13px; font-weight:600; color:#64748b; }
+    .theme-seg button[aria-pressed=true] { background:#fff; color:#0f172a; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+    html[data-theme=dark] .theme-seg { background:#1e293b; }
+    html[data-theme=dark] .theme-seg button { color:#94a3b8; }
+    html[data-theme=dark] .theme-seg button[aria-pressed=true] { background:#334155; color:#f8fafc; }
   </style>
+  <script>
+    (function(){try{var t=localStorage.getItem('mijnGeld.theme')||'auto';var d=t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
+  </script>
 </head>
 <body class="text-slate-800 min-h-screen antialiased">
   <div class="status-cover" aria-hidden="true"></div>
@@ -605,6 +659,14 @@
           </div>
           <button onclick="openNewPeriod()" class="w-full mt-3 py-3 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable">🔄 Nieuwe periode starten</button>
           <p class="text-xs text-slate-400 mt-2 text-center" id="period-current-info"></p>
+        </div>
+        <div class="bg-slate-50 rounded-2xl p-4 mb-2">
+          <p class="font-medium text-slate-800 mb-2">🌓 Weergave</p>
+          <div class="theme-seg" id="theme-seg" role="group" aria-label="Weergave">
+            <button type="button" data-theme-opt="auto" onclick="setTheme('auto')">Automatisch</button>
+            <button type="button" data-theme-opt="light" onclick="setTheme('light')">Licht</button>
+            <button type="button" data-theme-opt="dark" onclick="setTheme('dark')">Donker</button>
+          </div>
         </div>
         <div class="space-y-2">
           <button onclick="openRecurring()" class="w-full flex items-center gap-3 px-4 py-3.5 bg-slate-50 rounded-2xl font-medium pressable text-left">

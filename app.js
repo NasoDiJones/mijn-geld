@@ -1989,3 +1989,23 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       .catch(err => console.warn('SW registratie mislukt', err));
   });
 }
+
+// ===== v21: donkere modus (apparaat-instelling, niet gesynchroniseerd) =====
+const THEME_KEY = 'mijnGeld.theme';
+function getThemePref() { try { const t = localStorage.getItem(THEME_KEY); return (t === 'light' || t === 'dark') ? t : 'auto'; } catch (e) { return 'auto'; } }
+function applyTheme(animate) {
+  const pref = getThemePref();
+  const dark = pref === 'dark' || (pref === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  const root = document.documentElement;
+  const was = root.getAttribute('data-theme') === 'dark';
+  if (animate && was !== dark) { root.classList.add('theme-anim'); clearTimeout(applyTheme._t); applyTheme._t = setTimeout(() => root.classList.remove('theme-anim'), 400); }
+  if (dark) root.setAttribute('data-theme', 'dark'); else root.removeAttribute('data-theme');
+  document.querySelectorAll('[data-theme-opt]').forEach(b => b.setAttribute('aria-pressed', b.dataset.themeOpt === pref ? 'true' : 'false'));
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', '#0f172a');
+}
+function setTheme(pref) {
+  try { if (pref === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, pref); } catch (e) {}
+  applyTheme(true);
+}
+applyTheme(false);
+try { const mq = matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener ? mq.addEventListener('change', () => applyTheme(true)) : mq.addListener(() => applyTheme(true))); } catch (e) {}
