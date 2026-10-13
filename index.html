@@ -157,6 +157,7 @@
     html[data-theme=dark] body { color: #e2e8f0; }
     html[data-theme=dark] #app { background: radial-gradient(1200px 600px at 50% -200px, #1e1b4b 0%, #0b1220 55%), #0b1220 !important; }
     html[data-theme=dark] .bg-white { background-color: #1e293b !important; }
+    html[data-theme=dark] #assistant-token { background-color:#0f172a !important; color:#e2e8f0; border-color:#334155; }
     html[data-theme=dark] .bg-slate-50 { background-color: #0f172a !important; }
     html[data-theme=dark] .modal .bg-slate-50 { background-color: #0f172a !important; }
     html[data-theme=dark] .bg-slate-100 { background-color: #273449 !important; }
@@ -727,6 +728,19 @@
             <button onclick="mgSyncNow()" class="w-full py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl pressable mb-2">🔄 Nu synchroniseren</button>
             <p id="backup-last" class="text-xs text-slate-400 mb-1">Laatste back-up: …</p>
             <button onclick="mgBackupOpen()" class="w-full py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl pressable mb-2">🗄️ Back-up terugzetten</button>
+            <div id="assistant-box" class="mt-3 mb-3 p-3 bg-slate-50 rounded-xl">
+              <p class="text-sm font-semibold text-slate-700">🤖 Assistent-toegang</p>
+              <p id="assistant-status" class="text-xs text-slate-500 mt-1 mb-2">Uit. Zet dit aan als Main Bot uitgaven voor je mag toevoegen.</p>
+              <div id="assistant-token-wrap" class="hidden mb-2">
+                <p class="text-xs text-slate-600 mb-1">Je sleutel (alleen nu zichtbaar). Kopieer hem en plak hem in de chat bij Main Bot. Daarmee kan hij alleen uitgaven en inkomsten toevoegen (en je categorienamen zien), verder niets bekijken of wissen.</p>
+                <input type="text" id="assistant-token" readonly class="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl mb-2 text-xs font-mono">
+                <button type="button" onclick="mgAssistantCopy()" class="w-full py-2.5 bg-brand-600 text-white font-semibold rounded-xl pressable">📋 Kopiëren</button>
+              </div>
+              <div class="flex gap-2">
+                <button type="button" id="assistant-on" onclick="mgAssistantEnable()" class="flex-1 py-2.5 bg-brand-50 text-brand-700 font-semibold rounded-xl pressable">Aanzetten</button>
+                <button type="button" id="assistant-off" onclick="mgAssistantRevoke()" class="flex-1 py-2.5 bg-rose-50 text-rose-600 font-semibold rounded-xl pressable">Intrekken</button>
+              </div>
+            </div>
             <button onclick="mgSyncLogout()" class="w-full py-3 bg-rose-50 text-rose-600 font-semibold rounded-xl pressable">Uitloggen</button>
           </div>
         </div>

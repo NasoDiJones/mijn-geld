@@ -60,12 +60,26 @@
     return r.data;
   }
 
+  // Door de assistent toegevoegde transacties die nog niet lokaal staan meenemen vóór een upload.
+  function mergeAssistant(local, remote) {
+    if (!local || !remote || !remote.data || remote.updated_at === meta.lastSyncedAt) return false;
+    var since = meta.lastSyncedAt || '';
+    var have = {}; (local.transactions || []).forEach(function (t) { have[t.id] = 1; });
+    var add = (remote.data.transactions || []).filter(function (t) { return t && t.source === 'assistant' && !have[t.id] && (!since || (t.addedAt || '') > since); });
+    if (!add.length) return false;
+    local.transactions = add.concat(local.transactions || []);
+    local.transactions.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+    return true;
+  }
+  window.__mgMergeAssistant = mergeAssistant;
+
   async function upload() {
     if (!client || !user || !meta.householdId) return;
     if (!online()) { setStatus('offline'); return; }
     var data = localData();
     if (!data) return;
     setStatus('busy');
+    try { var rem = await fetchRemote(); if (mergeAssistant(data, rem)) { applying = true; try { localStorage.setItem('mijnGeldApp', JSON.stringify(data)); loadState(); if (typeof render === 'function') render(); } finally { applying = false; } } } catch (e) {}
     var now = new Date().toISOString();
     var r = await client.from('app_state').upsert({ household_id: meta.householdId, data: data, updated_at: now, updated_by: user.id });
     if (r.error) throw r.error;
@@ -93,7 +107,7 @@
       if (hid.error) throw hid.error;
       if (meta.householdId !== hid.data) { meta = { householdId: hid.data, initialized: false }; writeMeta(); }
       var remote = await fetchRemote();
-      if (meta.initialized) { await pullOrPush(remote); refreshLast(); return; }
+      if (meta.initialized) { await pullOrPush(remote); refreshLast(); assistantRefresh(); return; }
       var local = localData();
       if (!remote || !hasData(remote.data)) {
         if (hasData(local)) await upload();
@@ -107,7 +121,7 @@
       if (remote && !meta.lastSyncedAt) meta.lastSyncedAt = remote.updated_at;
       meta.initialized = true; writeMeta();
       setStatus('ok');
-      refreshLast();
+      refreshLast(); assistantRefresh();
     } catch (e) { fail(e); }
     finally { busy = false; }
   }
@@ -279,6 +293,40 @@
     } finally { busy = false; }
   };
 
+  // ---- Assistent-toegang ----
+  function aset(text) { var el = $('assistant-status'); if (el) el.textContent = text; }
+  async function assistantRefresh() {
+    if (!client || !user) return;
+    try {
+      var r = await client.rpc('assistant_token_status');
+      if (r.error) throw r.error;
+      var row = (r.data || [])[0];
+      aset(row && row.active ? 'Aan sinds ' + fmtBackup(row.created_at) + (row.last_used_at ? ' · laatst gebruikt ' + fmtBackup(row.last_used_at) : '') : 'Uit. Zet dit aan als Main Bot uitgaven voor je mag toevoegen.');
+    } catch (e) { aset(isMissing(e) ? 'Assistent-toegang nog niet ingesteld in Supabase' : 'Status onbekend'); }
+  }
+  window.mgAssistantEnable = async function () {
+    if (!client || !user) return;
+    if (!confirm('Assistent-toegang aanzetten? Er wordt een nieuwe sleutel gemaakt; een eventuele oude sleutel stopt met werken.')) return;
+    var r = await client.rpc('create_assistant_token');
+    if (r.error) { alert(isMissing(r.error) ? 'Assistent-toegang nog niet ingesteld in Supabase' : 'Aanzetten mislukt: ' + nlError(r.error)); return; }
+    $('assistant-token').value = r.data;
+    $('assistant-token-wrap').classList.remove('hidden');
+    assistantRefresh();
+  };
+  window.mgAssistantCopy = async function () {
+    var v = $('assistant-token').value; if (!v) return;
+    try { await navigator.clipboard.writeText(v); } catch (e) { var i = $('assistant-token'); i.select(); try { document.execCommand('copy'); } catch (x) {} }
+    toast('Sleutel gekopieerd ✓');
+  };
+  window.mgAssistantRevoke = async function () {
+    if (!client || !user || !confirm('Assistent-toegang intrekken? De sleutel werkt daarna niet meer.')) return;
+    var r = await client.rpc('revoke_assistant_token');
+    if (r.error) { alert(isMissing(r.error) ? 'Assistent-toegang nog niet ingesteld in Supabase' : 'Intrekken mislukt: ' + nlError(r.error)); return; }
+    $('assistant-token').value = ''; $('assistant-token-wrap').classList.add('hidden');
+    toast('Assistent-toegang ingetrokken');
+    assistantRefresh();
+  };
+
   window.mgSyncNow = function () { if (meta.dirty) return safe(upload); return syncNow(); };
 
   window.mgSyncLogout = async function () {
@@ -305,6 +353,8 @@
       if (user && (!was || was.id !== user.id)) setTimeout(afterLogin, 0);
     });
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') syncNow(); });
+    window.addEventListener('focus', function () { syncNow(); });
+    setInterval(function () { if (document.visibilityState === 'visible') syncNow(); }, 60000);
     window.addEventListener('online', function () { if (user) window.mgSyncNow(); });
     window.addEventListener('offline', function () { if (user) setStatus('offline'); });
   }
