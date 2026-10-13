@@ -78,8 +78,11 @@ function buildHistoryFromPast() {
   });
 }
 
+if (typeof window !== 'undefined') window.mgGetState = () => state;
+
 function saveState() {
   localStorage.setItem('mijnGeldApp', JSON.stringify(state));
+  if (typeof window !== 'undefined' && typeof window.mgSyncOnSave === 'function') { try { window.mgSyncOnSave(); } catch (e) {} }
 }
 
 // ==================== HELPERS ====================
