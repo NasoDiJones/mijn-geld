@@ -143,7 +143,7 @@
     /* v13: iOS 26 kleurt de statusbalk naar de body-achtergrond (was een lichte gradient) -> body effen navy, lichte achtergrond naar #app */
     html, body { background: #0f172a !important; background-color: #0f172a !important; }
     #app { background: radial-gradient(1200px 600px at 50% -200px, #e0e7ff 0%, #f1f5f9 55%), #f1f5f9 !important; }
-    .status-cover { position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: #0f172a; z-index: 1000; pointer-events: none; }
+    .status-cover { position: absolute; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: #0f172a; z-index: 1000; pointer-events: none; }
     .app-header, .app-header > .hdr-safe { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; box-shadow: none; }
     /* v14: scherpe koptekst, iets lager onder de statusbalk */
     .app-header, .app-header * { text-shadow: none !important; filter: none !important; }
@@ -207,7 +207,8 @@
     .search-total .pos{color:#059669}.search-total .neg{color:#e11d48}.search-total .sub{font-weight:400;color:#94a3b8;margin-right:6px}
     html[data-theme=dark] .search-total .pos{color:#34d399}html[data-theme=dark] .search-total .neg{color:#fb7185}html[data-theme=dark] .search-total .sub{color:#64748b}
     body.searching #transactions-list{min-height:100vh}
-    /* v24: kop scrollt gewoon mee weg (statisch); alleen status-cover blijft vast */
+    /* v24: kop scrollt gewoon mee weg (statisch); (v25: ook status-cover niet meer vast) */
+    /* v25: niets vast; status-cover scrollt mee weg */ .status-cover{position:absolute !important;}
     #app-header { position: relative !important; top: auto; z-index: 30; }
     #app { padding-top: 0 !important; }
     html[data-theme=dark] #app-header .hdr-safe { background:#0f172a; }
