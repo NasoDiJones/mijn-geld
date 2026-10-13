@@ -207,6 +207,10 @@
     .search-total .pos{color:#059669}.search-total .neg{color:#e11d48}.search-total .sub{font-weight:400;color:#94a3b8;margin-right:6px}
     html[data-theme=dark] .search-total .pos{color:#34d399}html[data-theme=dark] .search-total .neg{color:#fb7185}html[data-theme=dark] .search-total .sub{color:#64748b}
     body.searching #transactions-list{min-height:100vh}
+    /* v23: kop echt vast (position:fixed) – sticky werd op iOS-PWA losgelaten */
+    #app-header { position: fixed !important; top: 0; left: 0; right: 0; margin: 0 auto; max-width: 32rem; z-index: 30; }
+    #app { padding-top: var(--hdr-h, 250px); }
+    html[data-theme=dark] #app-header .hdr-safe { background:#0f172a; }
   </style>
   <script>
     (function(){try{var t=localStorage.getItem('mijnGeld.theme')||'auto';var d=t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
@@ -217,9 +221,9 @@
   <div id="app" class="max-w-lg mx-auto min-h-screen relative bg-slate-100">
 
     <!-- Header -->
-    <header class="sticky top-0 z-30 app-header">
+    <header id="app-header" class="z-30 app-header">
       <div class="hdr-safe" style="background:#0f172a"><div class="hdr-inner px-5 pb-4">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between mb-3">
           <div>
             <p class="hdr-label text-xs font-medium tracking-wide uppercase">Overzicht</p>
             <h1 class="hdr-title text-xl font-semibold tracking-tight">Mijn Geld</h1>
@@ -230,7 +234,7 @@
         </div>
 
         <!-- Balance card -->
-        <div class="bg-gradient-to-br from-brand-500 to-brand-700 rounded-2xl p-5 shadow-glow relative overflow-hidden">
+        <div class="bg-gradient-to-br from-brand-500 to-brand-700 rounded-2xl px-5 py-4 shadow-glow relative overflow-hidden">
           <div class="balance-shine"></div>
           <div class="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
           <div class="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2"></div>
@@ -240,7 +244,7 @@
             <span id="after-pots">Na potjes: € 0,00</span>
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" class="opacity-70 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
           </button>
-          <div class="flex gap-6 mt-5 relative">
+          <div class="flex gap-6 mt-3 relative">
             <div>
               <p class="text-brand-200/80 text-xs">In potjes</p>
               <p class="text-white font-semibold text-sm" id="pots-total">€ 0,00</p>
@@ -927,5 +931,8 @@
   <script src="app.js"></script>
   <script src="vendor/supabase.js" defer></script>
   <script src="sync.js" defer></script>
+<script>(function(){function u(){var h=document.getElementById('app-header');if(h)document.documentElement.style.setProperty('--hdr-h',Math.ceil(h.getBoundingClientRect().height)+'px');}
+function init(){u();var h=document.getElementById('app-header');if(h&&window.ResizeObserver)new ResizeObserver(u).observe(h);window.addEventListener('resize',u);window.addEventListener('orientationchange',function(){setTimeout(u,300)});}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();})();</script>
 </body>
 </html>
