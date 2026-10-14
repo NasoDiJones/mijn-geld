@@ -205,7 +205,8 @@ function getBalanceAfterPots() {
 }
 
 function getPotsTotal() {
-  return state.pots.reduce((s, p) => s + p.balance, 0);
+  // Een potje in de min reserveert niets: het tekort is al via de uitgave van het saldo af.
+  return Math.round(state.pots.reduce((s, p) => s + Math.max(0, p.balance), 0) * 100) / 100;
 }
 
 function getGoalsTotal() {
@@ -787,9 +788,9 @@ function renderPots() {
       </div>
       <div class="flex-1 min-w-0">
         <p class="font-semibold text-slate-900">${escapeHtml(p.name)}</p>
-        <p class="text-xs text-slate-400 mt-0.5">Potje</p>
+        <p class="text-xs mt-0.5 ${p.balance < 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'}">${p.balance < 0 ? 'In de min' : 'Potje'}</p>
       </div>
-      <p class="font-bold text-lg text-brand-700 tabular-nums">${formatMoney(p.balance)}</p>
+      <p class="font-bold text-lg ${p.balance < 0 ? 'text-rose-600' : 'text-brand-700'} tabular-nums">${formatMoney(p.balance)}</p>
     </div>
   `).join('');
 }
@@ -919,10 +920,6 @@ function addTransaction(e, type) {
 
   if (type === 'expense' && potId) {
     const pot = state.pots.find(p => p.id === potId);
-    if (pot && pot.balance < amount) {
-      alert('Er zit niet genoeg geld in dit potje.');
-      return;
-    }
     if (pot) pot.balance = Math.round((pot.balance - amount) * 100) / 100;
   }
 
@@ -1007,10 +1004,6 @@ function saveEditTransaction(e) {
   // Controleer eerst of het (nieuwe) potje genoeg heeft, met de oude uitgave teruggezet.
   const oldPot = t.type === 'expense' && t.potId ? state.pots.find(p => p.id === t.potId) : null;
   const newPot = newPotId ? state.pots.find(p => p.id === newPotId) : null;
-  if (newPot) {
-    const available = newPot.balance + (oldPot && oldPot.id === newPot.id ? t.amount : 0);
-    if (available < amount - 0.0001) return alert('Er zit niet genoeg geld in dit potje.');
-  }
   if (oldPot) oldPot.balance = Math.round((oldPot.balance + t.amount) * 100) / 100;
   if (newPot) newPot.balance = Math.round((newPot.balance - amount) * 100) / 100;
 
@@ -1326,8 +1319,7 @@ function bookRecurring(rec, period) {
   let note = null;
   if (potId) {
     const pot = state.pots.find(p => p.id === potId);
-    if (pot.balance < rec.amount) { note = `${rec.name}: te weinig in potje, geboekt zonder potje`; potId = null; }
-    else pot.balance = Math.round((pot.balance - rec.amount) * 100) / 100;
+    pot.balance = Math.round((pot.balance - rec.amount) * 100) / 100;
   }
   const [y, m, d] = due.split('-').map(Number);
   state.transactions.unshift({
