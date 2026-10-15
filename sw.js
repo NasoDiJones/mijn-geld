@@ -2,7 +2,7 @@
 // - Netwerk eerst (max ~3 s) voor de pagina, app.js, styles.css en manifest: updates zijn direct zichtbaar als je online bent.
 // - Cache eerst voor iconen (veranderen zelden).
 // - Offline: alles komt uit de cache.
-const CACHE = 'mijn-geld-v27';
+const CACHE = 'mijn-geld-v28';
 const NETWORK_TIMEOUT_MS = 3000;
 const CORE = ['./', './app.js', './sync.js', './vendor/supabase.js', './styles.css', './manifest.webmanifest'];
 const ICONS = ['./icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'];
@@ -18,7 +18,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   const activation = (async () => {
     const keys = await caches.keys();
-    const old = keys.filter(k => k !== CACHE);
+    const old = keys.filter(k => k.startsWith('mijn-geld-') && k !== CACHE);
     await Promise.all(old.map(k => caches.delete(k)));
     await self.clients.claim();
     return old.some(k => /^mijn-geld-v[1-5]$/.test(k));
