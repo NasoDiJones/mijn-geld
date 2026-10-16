@@ -191,12 +191,42 @@ function formatDate(dateStr) {
 }
 
 // ==================== CALCULATIONS ====================
-// Saldo = inkomsten - uitgaven. Potjes zijn alleen gereserveerd geld en verlagen het saldo niet;
-// pas bij uitgeven vanuit een potje (een uitgave) gaat het geld echt van het saldo af.
-function getAvailableBalance() {
+// Saldo = inkomsten - uitgaven - geld naar spaardoelen. Potjes zijn alleen gereserveerd geld en verlagen
+// het saldo niet; pas bij uitgeven vanuit een potje (een uitgave) gaat het geld echt van het saldo af.
+function getIncomeMinusExpense() {
   const income = state.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = state.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   return Math.round((income - expense) * 100) / 100;
+}
+
+function getAvailableBalance() {
+  return Math.round((getIncomeMinusExpense() - getGoalTransfersTotal()) * 100) / 100;
+}
+
+// Spaardoelen (v29): elke storting/opname via de app wordt per doel gelogd in goal.deposits
+// ([{ id, amount, date }], opname = negatief bedrag). Die bedragen gaan van het saldo af (of komen terug),
+// net als uitgaven: één keer, en blijvend (niet alleen in de huidige periode). Het startbedrag ('Al gespaard')
+// en bedragen van vóór v29 staan niet in het logboek: die zijn nooit van het saldo afgegaan en blijven dus buiten beschouwing.
+function goalDeposits(g) {
+  return Array.isArray(g && g.deposits) ? g.deposits.filter(d => d && typeof d.amount === 'number' && isFinite(d.amount)) : [];
+}
+
+function getGoalTransfersTotal(fromYmd, toYmd) {
+  let sum = 0;
+  (state.goals || []).forEach(g => goalDeposits(g).forEach(d => {
+    if (fromYmd || toYmd) {
+      const ymd = txYmd(d);
+      if (fromYmd && ymd < fromYmd) return;
+      if (toYmd && ymd > toYmd) return;
+    }
+    sum += d.amount;
+  }));
+  return Math.round(sum * 100) / 100;
+}
+
+// Netto naar spaardoelen in de huidige (salaris)periode.
+function getGoalTransfersThisPeriod() {
+  return getGoalTransfersTotal(state.lastPeriodStart);
 }
 
 // Wat er vrij te besteden is na aftrek van het geld in potjes.
@@ -806,13 +836,22 @@ function renderGoals() {
   }
   empty.classList.add('hidden');
 
-  list.innerHTML = state.goals.map((g, i) => {
+  const periodTotal = getGoalTransfersThisPeriod();
+  const summary = `
+      <div id="goals-period-summary" class="item-enter bg-brand-50 rounded-2xl px-4 py-3 flex items-center justify-between text-sm">
+        <span class="text-brand-700">Deze periode naar spaardoelen<span class="block text-xs text-brand-600/70">Gaat van je beschikbaar saldo af</span></span>
+        <span class="font-semibold tabular-nums text-brand-700">${periodTotal < 0 ? '+' + formatMoney(-periodTotal) : '−' + formatMoney(periodTotal)}</span>
+      </div>`;
+  list.innerHTML = summary + state.goals.map((g, i) => {
     const pct = Math.min(100, Math.round((g.current / g.target) * 100));
     return `
       <div class="item-enter bg-white rounded-2xl p-4 shadow-card border border-slate-100/60" style="animation-delay: ${i * 40}ms">
-        <div class="flex items-center justify-between mb-3">
-          <p class="font-semibold text-slate-900">${escapeHtml(g.name)}</p>
-          <button onclick="addToGoal('${g.id}')" class="text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-full pressable">+ Geld</button>
+        <div class="flex items-center justify-between mb-3 gap-2">
+          <p class="font-semibold text-slate-900 min-w-0 truncate">${escapeHtml(g.name)}</p>
+          <div class="flex items-center gap-1.5 shrink-0">
+            ${g.current > 0 ? `<button onclick="withdrawFromGoal('${g.id}')" class="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full pressable">− Geld</button>` : ''}
+            <button onclick="addToGoal('${g.id}')" class="text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-full pressable">+ Geld</button>
+          </div>
         </div>
         <div class="flex justify-between text-sm mb-1.5">
           <span class="font-medium text-slate-700 tabular-nums">${formatMoney(g.current)}</span>
@@ -1185,20 +1224,51 @@ function deletePot() {
   closeModal();
 }
 
+function parseAmountInput(text) {
+  const value = Math.round(parseFloat(String(text).trim().replace(/\s|€/g, '').replace(',', '.')) * 100) / 100;
+  return isNaN(value) || value <= 0 ? null : value;
+}
+
+function logGoalTransfer(goal, amount) {
+  if (!Array.isArray(goal.deposits)) goal.deposits = [];
+  goal.deposits.push({ id: uid(), amount, date: new Date().toISOString() });
+}
+
+// Geld naar een spaardoel: gaat van het beschikbaar saldo af (zie getAvailableBalance).
 function addToGoal(id) {
-  const amount = prompt('Hoeveel wil je toevoegen aan dit spaardoel?');
-  if (amount === null) return;
-  const value = parseFloat(amount.replace(',', '.'));
-  if (isNaN(value) || value <= 0) return alert('Ongeldig bedrag');
   const goal = state.goals.find(g => g.id === id);
-  if (goal) {
-    const before = goal.current;
-    goal.current = Math.round((goal.current + value) * 100) / 100;
-    saveState();
-    render();
-    if (before < goal.target && goal.current >= goal.target) celebrateGoal(goal);
-    else haptic(10);
-  }
+  if (!goal) return;
+  const amount = prompt(`Hoeveel wil je naar "${goal.name}" overmaken?\nDit gaat van je beschikbaar saldo af.`);
+  if (amount === null) return;
+  const value = parseAmountInput(amount);
+  if (value === null) return alert('Ongeldig bedrag');
+  const free = getBalanceAfterPots();
+  if (value > free && !confirm(`Na potjes heb je nog ${formatMoney(free)} vrij. Toch ${formatMoney(value)} naar "${goal.name}"?`)) return;
+  const before = goal.current;
+  goal.current = Math.round((goal.current + value) * 100) / 100;
+  logGoalTransfer(goal, value);
+  saveState();
+  render();
+  showToast(`${formatMoney(value)} naar "${goal.name}" ✓`);
+  if (before < goal.target && goal.current >= goal.target) celebrateGoal(goal);
+  else haptic(10);
+}
+
+// Geld uit een spaardoel halen: komt terug op het beschikbaar saldo.
+function withdrawFromGoal(id) {
+  const goal = state.goals.find(g => g.id === id);
+  if (!goal) return;
+  const amount = prompt(`Hoeveel wil je uit "${goal.name}" halen? (max ${formatMoney(goal.current)})\nDit komt terug op je beschikbaar saldo.`);
+  if (amount === null) return;
+  const value = parseAmountInput(amount);
+  if (value === null) return alert('Ongeldig bedrag');
+  if (value > goal.current + 0.001) return alert(`Er staat maar ${formatMoney(goal.current)} in "${goal.name}".`);
+  goal.current = Math.round((goal.current - value) * 100) / 100;
+  logGoalTransfer(goal, -value);
+  saveState();
+  render();
+  showToast(`${formatMoney(value)} terug naar je saldo ✓`);
+  haptic(10);
 }
 
 // Settings
@@ -1426,6 +1496,8 @@ function openBalanceBreakdown() {
   const upcoming = getUpcomingRecurring();
   const saldo = getAvailableBalance(), pots = getPotsTotal(), afterPots = getBalanceAfterPots();
   const fixed = sumAmounts(upcoming);
+  const toGoals = getGoalTransfersTotal(), toGoalsPeriod = getGoalTransfersThisPeriod();
+  const signed = x => (x < 0 ? '+' : '−') + formatMoney(Math.abs(x));
   const row = (label, value, cls = 'text-slate-900', sub = '') => `
     <div class="flex items-center justify-between py-2.5">
       <span class="text-slate-600">${label}${sub ? `<span class="block text-xs text-slate-400">${sub}</span>` : ''}</span>
@@ -1433,7 +1505,9 @@ function openBalanceBreakdown() {
     </div>`;
   document.getElementById('balance-body').innerHTML = `
     <div class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
-      ${row('Beschikbaar saldo', formatMoney(saldo))}
+      ${toGoals !== 0 ? row('Inkomsten − uitgaven', formatMoney(getIncomeMinusExpense())) +
+        row('Naar spaardoelen', signed(toGoals), 'text-brand-700', `deze periode ${signed(toGoalsPeriod)}`) : ''}
+      ${row(toGoals !== 0 ? '<span class="font-semibold text-slate-800">Beschikbaar saldo</span>' : 'Beschikbaar saldo', formatMoney(saldo))}
       ${row('In potjes', '−' + formatMoney(pots), 'text-brand-700')}
       ${row('<span class="font-semibold text-slate-800">Na potjes</span>', formatMoney(afterPots))}
       ${row('Vaste lasten nog te gaan', '−' + formatMoney(fixed), 'text-rose-600', upcoming.length ? `${upcoming.length} t/m ${formatShortDate(recurringPeriod().end)}` : 'niets meer deze periode')}
@@ -1714,7 +1788,8 @@ function validateBackup(data) {
     typeof t.amount !== 'number' || !isFinite(t.amount) || isNaN(new Date(t.date).getTime()));
   if (badTx) return 'De back-up bevat een ongeldige transactie.';
   if ((data.pots || []).some(pt => !pt || typeof pt.balance !== 'number')) return 'De back-up bevat een ongeldig potje.';
-  if ((data.goals || []).some(g => !g || typeof g.current !== 'number' || typeof g.target !== 'number')) return 'De back-up bevat een ongeldig spaardoel.';
+  if ((data.goals || []).some(g => !g || typeof g.current !== 'number' || typeof g.target !== 'number' ||
+    (g.deposits != null && (!Array.isArray(g.deposits) || g.deposits.some(d => !d || typeof d.amount !== 'number' || !isFinite(d.amount) || isNaN(new Date(d.date).getTime())))))) return 'De back-up bevat een ongeldig spaardoel.';
   if (typeof data.version === 'number' && data.version > DATA_VERSION) return 'Deze back-up komt uit een nieuwere versie van de app.';
   return null;
 }
