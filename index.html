@@ -180,6 +180,15 @@
     html[data-theme=dark] .text-emerald-600 { color: #34d399 !important; }
     html[data-theme=dark] .bg-amber-50 { background-color: rgba(245,158,11,.15) !important; }
     html[data-theme=dark] .text-amber-600 { color: #fbbf24 !important; }
+    /* Spaardoelen: eigen kleur (teal), los van potjes (indigo) en inkomsten (groen) */
+    .goal-text { color: #0f766e; }
+    .goal-text-soft { color: rgba(15,118,110,.75); }
+    .goal-bg { background-color: #f0fdfa; }
+    .goal-bar { background-image: linear-gradient(to right, #14b8a6, #5eead4); }
+    .goal-line { color: #99f6e4; }
+    html[data-theme=dark] .goal-text { color: #5eead4 !important; }
+    html[data-theme=dark] .goal-text-soft { color: rgba(94,234,212,.75) !important; }
+    html[data-theme=dark] .goal-bg { background-color: rgba(20,184,166,.15) !important; }
     html[data-theme=dark] input, html[data-theme=dark] select, html[data-theme=dark] textarea { color: #e2e8f0; }
     html[data-theme=dark] input::placeholder, html[data-theme=dark] textarea::placeholder { color: #64748b; }
     html[data-theme=dark] .modal input.bg-white, html[data-theme=dark] .modal select.bg-white { background-color: #0f172a !important; }
@@ -246,13 +255,14 @@
             <span id="after-pots">Na potjes: € 0,00</span>
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24" class="opacity-70 shrink-0"><path d="M9 6l6 6-6 6"/></svg>
           </button>
+          <p id="goals-line" class="hidden relative mt-0.5 text-sm font-medium tabular-nums goal-line"></p>
           <div class="flex gap-6 mt-3 relative">
             <div>
-              <p class="text-brand-200/80 text-xs">In potjes</p>
+              <p class="text-brand-200/80 text-xs">🏺 In potjes</p>
               <p class="text-white font-semibold text-sm" id="pots-total">€ 0,00</p>
             </div>
             <div>
-              <p class="text-brand-200/80 text-xs">Spaardoelen</p>
+              <p class="text-brand-200/80 text-xs">🎯 Spaardoelen</p>
               <p class="text-white font-semibold text-sm" id="goals-total">€ 0,00</p>
             </div>
           </div>

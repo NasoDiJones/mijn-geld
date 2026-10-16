@@ -254,6 +254,12 @@ function render() {
   document.getElementById('settings-recurring-count').textContent = activeCount ? `${activeCount} actief` : '';
   countUp(document.getElementById('pots-total'), getPotsTotal());
   countUp(document.getElementById('goals-total'), getGoalsTotal());
+  const goalsLine = document.getElementById('goals-line');
+  if (goalsLine) {
+    const gp = getGoalTransfersThisPeriod();
+    goalsLine.classList.toggle('hidden', gp === 0);
+    goalsLine.textContent = gp === 0 ? '' : `🎯 Deze periode ${gp < 0 ? 'uit spaardoelen: +' + formatMoney(-gp) : 'naar spaardoelen: −' + formatMoney(gp)}`;
+  }
 
   renderTransactions();
   renderPots();
@@ -300,7 +306,18 @@ function periodStats(p) {
   expenses.filter(t => t.potId).forEach(t => { spentByPot[t.potId] = r((spentByPot[t.potId] || 0) + t.amount); });
   const days = Math.max(1, daysBetween(p.start, p.end));
   const fixed = r(expenses.filter(t => t.recurringId).reduce((s, t) => s + t.amount, 0));
+  // Spaardoelen (los van uitgaven): netto stortingen in deze periode, opnames negatief.
+  const endYmd = p.isCurrent ? null : p.end;
+  const savedByGoal = {};
+  (state.goals || []).forEach(g => goalDeposits(g).forEach(d => {
+    const ymd = txYmd(d);
+    if (ymd < p.start || (endYmd && ymd > endYmd)) return;
+    savedByGoal[g.id] = r((savedByGoal[g.id] || 0) + d.amount);
+  }));
+  const saved = r(Object.values(savedByGoal).reduce((a, b) => a + b, 0));
   return { txs, expenses, income, expense, fixed, net: r(income - expense), categories, spentByPot, days,
+    saved, savedByGoal, leftAfterSaving: r(income - expense - saved),
+    savedRate: income > 0 ? saved / income * 100 : null,
     perDay: expense / days, savingsRate: income > 0 ? (income - expense) / income * 100 : null };
 }
 
@@ -368,10 +385,13 @@ function renderAnalysis() {
     <div class="grid grid-cols-2 gap-2">
       ${tile('Inkomsten', formatMoney(s.income), changeBadge(s.income, prev && prev.income, true), 'text-emerald-600')}
       ${tile('Uitgaven', formatMoney(s.expense), changeBadge(s.expense, prev && prev.expense, false), 'text-rose-600')}
+      ${tile('🎯 Gespaard', (s.saved < 0 ? '−' : '') + formatMoney(Math.abs(s.saved)),
+        `<span class="text-[11px] text-slate-400">${s.savedRate == null ? 'naar spaardoelen' : formatPct(s.savedRate) + ' van inkomsten'}</span>`, 'goal-text')}
       ${tile('Netto', (s.net >= 0 ? '+' : '−') + formatMoney(Math.abs(s.net)), changeBadge(s.net, prev && prev.net, true), s.net >= 0 ? 'text-slate-900' : 'text-rose-600')}
-      ${tile('Spaarpercentage', s.savingsRate == null ? '–' : formatPct(s.savingsRate), pointsBadge(s.savingsRate, prev && prev.savingsRate))}
-      <div class="col-span-2">${tile('Gemiddelde uitgave per dag', formatMoney(s.perDay), changeBadge(s.perDay, prev && prev.perDay, false))}</div>
+      ${tile('Niet uitgegeven', s.savingsRate == null ? '–' : formatPct(s.savingsRate), pointsBadge(s.savingsRate, prev && prev.savingsRate))}
+      ${tile('Gem. uitgave per dag', formatMoney(s.perDay), changeBadge(s.perDay, prev && prev.perDay, false))}
     </div>
+    <p class="text-[11px] text-slate-400 mt-2">Gespaard = wat je naar je spaardoelen hebt gezet (opnames eraf). Dat telt niet als uitgave. Netto = inkomsten − uitgaven; daarvan ${s.saved !== 0 ? `ging ${formatMoney(s.saved)} naar spaardoelen en bleef ${formatMoney(s.leftAfterSaving)} over` : 'ging niets naar spaardoelen'}.</p>
     ${s.fixed > 0 ? `
     <div class="mt-3 bg-slate-50 rounded-2xl p-3">
       <div class="flex items-center justify-between text-sm">
@@ -435,8 +455,9 @@ function renderAnalysis() {
   // --- Trend: laatste 6 periodes ---
   const trendPeriods = periods.slice(0, 6).reverse();
   const trendStats = trendPeriods.map(p => ({ p, st: periodStats(p) }));
-  const maxTrend = Math.max(1, ...trendStats.map(x => Math.max(x.st.income, x.st.expense)));
-  const W = 320, H = 150, top = 14, base = 122, n = trendStats.length, slot = W / Math.max(n, 1), bw = Math.min(18, slot / 3.2);
+  const maxTrend = Math.max(1, ...trendStats.map(x => Math.max(x.st.income, x.st.expense, x.st.saved)));
+  const anySaved = trendStats.some(x => x.st.saved !== 0);
+  const W = 320, H = 150, top = 14, base = 122, n = trendStats.length, slot = W / Math.max(n, 1), bw = Math.min(anySaved ? 13 : 18, slot / (anySaved ? 4.4 : 3.2));
   const fmtShort = v => v >= 1000 ? `€${(v / 1000).toLocaleString('nl-NL', { maximumFractionDigits: 1 })}k` : `€${Math.round(v)}`;
   const trendSvg = `
     <svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Inkomsten en uitgaven per periode">
@@ -448,8 +469,12 @@ function renderAnalysis() {
         const sel = p.key === period.key;
         return `
           ${sel ? `<rect x="${cx - slot / 2 + 3}" y="2" width="${slot - 6}" height="${H - 4}" rx="10" fill="#eef2ff"/>` : ''}
+          ${anySaved ? (() => { const hs = (base - top) * Math.max(0, st.saved) / maxTrend; return `
+          <rect x="${cx - bw * 1.5 - 2}" y="${base - hi}" width="${bw}" height="${Math.max(hi, 0.5)}" rx="3" fill="#10b981"/>
+          <rect x="${cx - bw / 2}" y="${base - he}" width="${bw}" height="${Math.max(he, 0.5)}" rx="3" fill="#f43f5e"/>
+          <rect class="trend-saved" x="${cx + bw / 2 + 2}" y="${base - hs}" width="${bw}" height="${Math.max(hs, 0.5)}" rx="3" fill="#14b8a6"/>`; })() : `
           <rect x="${cx - bw - 1.5}" y="${base - hi}" width="${bw}" height="${Math.max(hi, 0.5)}" rx="3" fill="#10b981"/>
-          <rect x="${cx + 1.5}" y="${base - he}" width="${bw}" height="${Math.max(he, 0.5)}" rx="3" fill="#f43f5e"/>
+          <rect x="${cx + 1.5}" y="${base - he}" width="${bw}" height="${Math.max(he, 0.5)}" rx="3" fill="#f43f5e"/>`}
           <text x="${cx}" y="${base + 13}" text-anchor="middle" font-size="10" fill="${sel ? '#4338ca' : '#94a3b8'}" font-weight="${sel ? 700 : 500}">${p.isCurrent ? 'nu' : ymdToDate(p.start).toLocaleDateString('nl-NL', { month: 'short' }).replace('.', '')}</text>
           <text x="${cx}" y="${base + 24}" text-anchor="middle" font-size="8.5" fill="${st.net >= 0 ? '#059669' : '#e11d48'}">${st.net >= 0 ? '+' : '−'}${fmtShort(Math.abs(st.net))}</text>`;
       }).join('')}
@@ -458,6 +483,7 @@ function renderAnalysis() {
     <div class="flex gap-4 justify-center mt-1 text-xs text-slate-500">
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>Inkomsten</span>
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span>Uitgaven</span>
+      ${anySaved ? '<span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:#14b8a6"></span>Gespaard</span>' : ''}
     </div>`;
 
   // --- Uitgaven door de periode (cumulatief) ---
@@ -516,6 +542,29 @@ function renderAnalysis() {
       </div>`;
   }).join('')}</div>`;
 
+  // --- Spaardoelen (apart van potjes en uitgaven) ---
+  const goalRows = (state.goals || []).map(g => ({ g, inPeriod: s.savedByGoal[g.id] || 0 }))
+    .sort((a, b) => b.inPeriod - a.inPeriod);
+  const goalsHtml = !goalRows.length ? emptyNote('Nog geen spaardoelen.') : `
+    <div class="flex items-center justify-between text-sm goal-bg rounded-xl px-3.5 py-2.5 mb-3">
+      <span class="goal-text font-medium">Totaal ${period.isCurrent ? 'deze periode' : 'in deze periode'}</span>
+      <span class="goal-text font-bold tabular-nums">${s.saved < 0 ? '−' : '+'}${formatMoney(Math.abs(s.saved))}</span>
+    </div>
+    <div class="space-y-3.5">${goalRows.map(({ g, inPeriod }) => {
+      const pct = g.target > 0 ? Math.min(100, g.current / g.target * 100) : 0;
+      return `
+      <div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="font-medium text-slate-800 truncate">🎯 ${escapeHtml(g.name)}</span>
+          <span class="text-xs tabular-nums shrink-0 ${inPeriod > 0 ? 'goal-text font-semibold' : inPeriod < 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'}">${inPeriod > 0 ? '+' + formatMoney(inPeriod) : inPeriod < 0 ? '−' + formatMoney(-inPeriod) + ' opgenomen' : 'niets gestort'}</span>
+        </div>
+        <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden mt-1.5"><div class="h-full rounded-full goal-bar" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="flex justify-between text-xs mt-1 tabular-nums">
+          <span class="text-slate-500">Nu ${formatMoney(g.current)} van ${formatMoney(g.target)}</span>
+          <span class="text-slate-400">${formatPct(pct)}</span>
+        </div>
+      </div>`; }).join('')}</div>`;
+
   // --- Top 5 ---
   const top5 = [...s.expenses].sort((a, b) => b.amount - a.amount).slice(0, 5);
   const topHtml = !top5.length ? emptyNote('Geen uitgaven in deze periode.') : `<div class="space-y-1.5">${top5.map((t, i) => `
@@ -533,7 +582,8 @@ function renderAnalysis() {
     card('Uitgaven per categorie', catHtml),
     card('Uitgaven door de periode', lineHtml, '<span class="text-[11px] text-slate-400">cumulatief</span>'),
     card('Trend', trendStats.length > 1 || s.income || s.expense ? trendSvg : emptyNote('Nog geen gegevens.'), `<span class="text-[11px] text-slate-400">laatste ${trendStats.length} ${trendStats.length === 1 ? 'periode' : 'periodes'}</span>`),
-    card('Potjes', potsHtml),
+    card('🎯 Spaardoelen', goalsHtml, '<span class="text-[11px] text-slate-400">geen uitgaven</span>'),
+    card('🏺 Potjes', potsHtml),
     card('Top 5 grootste uitgaven', topHtml),
   ].join('');
 }
@@ -838,9 +888,9 @@ function renderGoals() {
 
   const periodTotal = getGoalTransfersThisPeriod();
   const summary = `
-      <div id="goals-period-summary" class="item-enter bg-brand-50 rounded-2xl px-4 py-3 flex items-center justify-between text-sm">
-        <span class="text-brand-700">Deze periode naar spaardoelen<span class="block text-xs text-brand-600/70">Gaat van je beschikbaar saldo af</span></span>
-        <span class="font-semibold tabular-nums text-brand-700">${periodTotal < 0 ? '+' + formatMoney(-periodTotal) : '−' + formatMoney(periodTotal)}</span>
+      <div id="goals-period-summary" class="item-enter goal-bg rounded-2xl px-4 py-3 flex items-center justify-between text-sm">
+        <span class="goal-text">🎯 Deze periode naar spaardoelen<span class="block text-xs goal-text-soft">Gaat van je beschikbaar saldo af · staat los van je potjes</span></span>
+        <span class="font-semibold tabular-nums goal-text whitespace-nowrap shrink-0 ml-1">${periodTotal < 0 ? '+' + formatMoney(-periodTotal) : '−' + formatMoney(periodTotal)}</span>
       </div>`;
   list.innerHTML = summary + state.goals.map((g, i) => {
     const pct = Math.min(100, Math.round((g.current / g.target) * 100));
@@ -850,7 +900,7 @@ function renderGoals() {
           <p class="font-semibold text-slate-900 min-w-0 truncate">${escapeHtml(g.name)}</p>
           <div class="flex items-center gap-1.5 shrink-0">
             ${g.current > 0 ? `<button onclick="withdrawFromGoal('${g.id}')" class="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full pressable">− Geld</button>` : ''}
-            <button onclick="addToGoal('${g.id}')" class="text-xs font-semibold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-full pressable">+ Geld</button>
+            <button onclick="addToGoal('${g.id}')" class="text-xs font-semibold goal-text goal-bg px-3 py-1.5 rounded-full pressable">+ Geld</button>
           </div>
         </div>
         <div class="flex justify-between text-sm mb-1.5">
@@ -858,7 +908,7 @@ function renderGoals() {
           <span class="text-slate-400 tabular-nums">${formatMoney(g.target)}</span>
         </div>
         <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-          <div class="progress-bar h-full bg-gradient-to-r from-brand-500 to-brand-400 rounded-full" style="width: ${pct}%"></div>
+          <div class="progress-bar h-full goal-bar rounded-full" style="width: ${pct}%"></div>
         </div>
         <p class="text-xs mt-2 ${pct >= 100 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}">${pct >= 100 ? '🎉 Doel bereikt!' : pct + '% bereikt'}</p>
       </div>
@@ -1243,7 +1293,7 @@ function addToGoal(id) {
   const value = parseAmountInput(amount);
   if (value === null) return alert('Ongeldig bedrag');
   const free = getBalanceAfterPots();
-  if (value > free && !confirm(`Na potjes heb je nog ${formatMoney(free)} vrij. Toch ${formatMoney(value)} naar "${goal.name}"?`)) return;
+  if (value > free && !confirm(`Je hebt nog ${formatMoney(free)} vrij (saldo min wat in je potjes zit). Toch ${formatMoney(value)} naar "${goal.name}"?`)) return;
   const before = goal.current;
   goal.current = Math.round((goal.current + value) * 100) / 100;
   logGoalTransfer(goal, value);
@@ -1503,13 +1553,23 @@ function openBalanceBreakdown() {
       <span class="text-slate-600">${label}${sub ? `<span class="block text-xs text-slate-400">${sub}</span>` : ''}</span>
       <span class="font-semibold tabular-nums ${cls}">${value}</span>
     </div>`;
+  const head = (icon, text, first) => `<h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider ${first ? '' : 'mt-4 '}mb-1.5">${icon} ${text}</h4>`;
+  const goalsNow = getGoalsTotal();
   document.getElementById('balance-body').innerHTML = `
-    <div class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
+    ${head('🎯', 'Saldo & spaardoelen', true)}
+    <div id="bd-goals" class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
       ${toGoals !== 0 ? row('Inkomsten − uitgaven', formatMoney(getIncomeMinusExpense())) +
-        row('Naar spaardoelen', signed(toGoals), 'text-brand-700', `deze periode ${signed(toGoalsPeriod)}`) : ''}
-      ${row(toGoals !== 0 ? '<span class="font-semibold text-slate-800">Beschikbaar saldo</span>' : 'Beschikbaar saldo', formatMoney(saldo))}
-      ${row('In potjes', '−' + formatMoney(pots), 'text-brand-700')}
+        row('🎯 Naar spaardoelen', signed(toGoals), 'goal-text', `deze periode ${signed(toGoalsPeriod)} · los van je potjes`) : ''}
+      ${row('<span class="font-semibold text-slate-800">Beschikbaar saldo</span>', formatMoney(saldo))}
+    </div>
+    ${goalsNow > 0 ? `<p class="text-[11px] text-slate-400 mt-1.5 px-1">In je spaardoelen staat in totaal ${formatMoney(goalsNow)}. Dat telt niet mee als potje.</p>` : ''}
+    ${head('🏺', 'Potjes')}
+    <div id="bd-pots" class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
+      ${row('In potjes', '−' + formatMoney(pots), 'text-brand-700', 'alleen je potjes, geen spaardoelen')}
       ${row('<span class="font-semibold text-slate-800">Na potjes</span>', formatMoney(afterPots))}
+    </div>
+    ${head('📅', 'Vaste lasten')}
+    <div class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
       ${row('Vaste lasten nog te gaan', '−' + formatMoney(fixed), 'text-rose-600', upcoming.length ? `${upcoming.length} t/m ${formatShortDate(recurringPeriod().end)}` : 'niets meer deze periode')}
       ${row('<span class="font-bold text-slate-900">Vrij te besteden</span>', formatMoney(afterPots - fixed), afterPots - fixed < 0 ? 'text-rose-600 text-lg' : 'text-emerald-600 text-lg')}
     </div>
