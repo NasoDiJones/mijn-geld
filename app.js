@@ -86,8 +86,11 @@ function saveState() {
 }
 
 // ==================== HELPERS ====================
+// Negatieve bedragen als '−€ 120,00' (minteken vóór het euroteken) i.p.v. nl-NL's '€ -120,00', zodat een tekort meteen opvalt.
 function formatMoney(amount) {
-  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(amount || 0);
+  const v = Math.round((amount || 0) * 100) / 100;
+  const txt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(Math.abs(v));
+  return v < 0 ? '\u2212' + txt : txt;
 }
 
 function uid() {
@@ -239,17 +242,46 @@ function getPotsTotal() {
   return Math.round(state.pots.reduce((s, p) => s + Math.max(0, p.balance), 0) * 100) / 100;
 }
 
+// Vaste lasten die deze periode nog komen en NIET al gedekt zijn door het gekoppelde potje.
+// Een vaste last met een potje wordt bij het boeken van dat potje afgeschreven; dat geld is dus al
+// gereserveerd en zit al in 'In potjes'. Alleen het deel dat het potje niet dekt, telt hier nog mee
+// (anders zou dezelfde huur twee keer van 'Na potjes & vaste lasten' afgaan).
+function getUpcomingFixedImpact(upcoming = getUpcomingRecurring()) {
+  const pool = {};
+  state.pots.forEach(p => { pool[p.id] = Math.max(0, p.balance); });
+  let sum = 0;
+  upcoming.forEach(r => {
+    let amt = r.amount;
+    if (r.potId && pool[r.potId] !== undefined) {
+      const covered = Math.min(pool[r.potId], amt);
+      pool[r.potId] -= covered;
+      amt -= covered;
+    }
+    sum += amt;
+  });
+  return Math.round(sum * 100) / 100;
+}
+
+// Wat er echt vrij te besteden is: saldo − potjes − (niet door potjes gedekte) vaste lasten. Mag negatief zijn.
+function getFreeToSpend(upcoming = getUpcomingRecurring()) {
+  return Math.round((getBalanceAfterPots() - getUpcomingFixedImpact(upcoming)) * 100) / 100;
+}
+
 function getGoalsTotal() {
   return state.goals.reduce((s, g) => s + g.current, 0);
 }
 
 // ==================== RENDER ====================
 function render() {
-  countUp(document.getElementById('available-balance'), getAvailableBalance());
+  const availEl = document.getElementById('available-balance');
+  countUp(availEl, getAvailableBalance());
+  availEl.classList.toggle('balance-neg', getAvailableBalance() < 0);
   const upcoming = getUpcomingRecurring();
-  document.getElementById('after-pots').textContent = upcoming.length
-    ? `Na potjes & vaste lasten: ${formatMoney(getBalanceAfterPots() - sumAmounts(upcoming))}`
-    : `Na potjes: ${formatMoney(getBalanceAfterPots())}`;
+  // Kan gewoon negatief worden (meer in potjes/vaste lasten dan je hebt): dan rood met minteken.
+  const free = upcoming.length ? getFreeToSpend(upcoming) : getBalanceAfterPots();
+  const afterEl = document.getElementById('after-pots');
+  afterEl.innerHTML = `${upcoming.length ? 'Na potjes &amp; vaste lasten' : 'Na potjes'}: <span id="after-pots-amount" class="after-pots-amount${free < 0 ? ' is-negative' : ''}">${formatMoney(free)}</span>`;
+  afterEl.classList.toggle('is-negative', free < 0);
   const activeCount = (state.recurring || []).filter(r => r.active).length;
   document.getElementById('settings-recurring-count').textContent = activeCount ? `${activeCount} actief` : '';
   countUp(document.getElementById('pots-total'), getPotsTotal());
@@ -1545,7 +1577,8 @@ function repairRecurringData() {
 function openBalanceBreakdown() {
   const upcoming = getUpcomingRecurring();
   const saldo = getAvailableBalance(), pots = getPotsTotal(), afterPots = getBalanceAfterPots();
-  const fixed = sumAmounts(upcoming);
+  const fixedAll = sumAmounts(upcoming), fixed = getUpcomingFixedImpact(upcoming), fromPots = Math.round((fixedAll - fixed) * 100) / 100;
+  const free = Math.round((afterPots - fixed) * 100) / 100;
   const toGoals = getGoalTransfersTotal(), toGoalsPeriod = getGoalTransfersThisPeriod();
   const signed = x => (x < 0 ? '+' : '−') + formatMoney(Math.abs(x));
   const row = (label, value, cls = 'text-slate-900', sub = '') => `
@@ -1560,18 +1593,19 @@ function openBalanceBreakdown() {
     <div id="bd-goals" class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
       ${toGoals !== 0 ? row('Inkomsten − uitgaven', formatMoney(getIncomeMinusExpense())) +
         row('🎯 Naar spaardoelen', signed(toGoals), 'goal-text', `deze periode ${signed(toGoalsPeriod)} · los van je potjes`) : ''}
-      ${row('<span class="font-semibold text-slate-800">Beschikbaar saldo</span>', formatMoney(saldo))}
+      ${row('<span class="font-semibold text-slate-800">Beschikbaar saldo</span>', formatMoney(saldo), saldo < 0 ? 'text-rose-600' : 'text-slate-900')}
     </div>
     ${goalsNow > 0 ? `<p class="text-[11px] text-slate-400 mt-1.5 px-1">In je spaardoelen staat in totaal ${formatMoney(goalsNow)}. Dat telt niet mee als potje.</p>` : ''}
     ${head('🏺', 'Potjes')}
     <div id="bd-pots" class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
       ${row('In potjes', '−' + formatMoney(pots), 'text-brand-700', 'alleen je potjes, geen spaardoelen')}
-      ${row('<span class="font-semibold text-slate-800">Na potjes</span>', formatMoney(afterPots))}
+      ${row('<span class="font-semibold text-slate-800">Na potjes</span>', formatMoney(afterPots), afterPots < 0 ? 'text-rose-600' : 'text-slate-900')}
     </div>
     ${head('📅', 'Vaste lasten')}
     <div class="bg-slate-50 rounded-2xl px-4 divide-y divide-slate-200/70">
-      ${row('Vaste lasten nog te gaan', '−' + formatMoney(fixed), 'text-rose-600', upcoming.length ? `${upcoming.length} t/m ${formatShortDate(recurringPeriod().end)}` : 'niets meer deze periode')}
-      ${row('<span class="font-bold text-slate-900">Vrij te besteden</span>', formatMoney(afterPots - fixed), afterPots - fixed < 0 ? 'text-rose-600 text-lg' : 'text-emerald-600 text-lg')}
+      ${row('Vaste lasten nog te gaan', '−' + formatMoney(fixed), 'text-rose-600', (upcoming.length ? `${upcoming.length} t/m ${formatShortDate(recurringPeriod().end)}` : 'niets meer deze periode') + (fromPots > 0 ? ` · ${formatMoney(fromPots)} al gereserveerd in potjes` : ''))}
+      <div id="bd-free">${row('<span class="font-bold text-slate-900">Vrij te besteden</span>', formatMoney(free), free < 0 ? 'text-rose-600 text-lg' : 'text-emerald-600 text-lg')}</div>
+      ${free < 0 ? `<p id="bd-free-note" class="text-xs text-rose-600 py-2">Je komt ${formatMoney(-free)} tekort deze periode.</p>` : ''}
     </div>
     ${upcoming.length ? `
       <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mt-5 mb-2">Nog te gaan</h4>
