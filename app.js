@@ -247,7 +247,7 @@ function runGoalResets(now = new Date()) {
   const period = getCurrentPeriodStart(now);
   const resets = [];
   (state.goals || []).forEach(g => {
-    if (!goalResetsEnabled(g)) return;
+    if (!goalResetsEnabled(g) || isGoalDeleted(g)) return;
     if (typeof g.lastResetPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.lastResetPeriod)) {
       g.lastResetPeriod = period; // oude/geïmporteerde data zonder markering: niet meteen resetten
       return;
@@ -309,8 +309,14 @@ function getFreeToSpend(upcoming = getUpcomingRecurring()) {
   return Math.round((getBalanceAfterPots() - getUpcomingFixedImpact(upcoming)) * 100) / 100;
 }
 
+// v33: verwijderde spaardoelen (goal.deleted === true) blijven in state.goals staan zodat hun stortingen
+// in eerdere periodes (saldo, Analyse) blijven meetellen, maar ze zijn verder overal onzichtbaar.
+function isGoalDeleted(g) { return !!(g && g.deleted === true); }
+function activeGoals() { return (state.goals || []).filter(g => g && !isGoalDeleted(g)); }
+function findActiveGoal(id) { return activeGoals().find(g => g.id === id); }
+
 function getGoalsTotal() {
-  return state.goals.reduce((s, g) => s + g.current, 0);
+  return activeGoals().reduce((s, g) => s + g.current, 0);
 }
 
 // ==================== RENDER ====================
@@ -617,7 +623,9 @@ function renderAnalysis() {
   }).join('')}</div>`;
 
   // --- Spaardoelen (apart van potjes en uitgaven) ---
-  const goalRows = (state.goals || []).map(g => ({ g, inPeriod: s.savedByGoal[g.id] || 0 }))
+  // Verwijderde doelen alleen tonen als ze in deze periode stortingen/opnames hadden.
+  const goalRows = (state.goals || []).filter(g => g && (!isGoalDeleted(g) || g.id in s.savedByGoal))
+    .map(g => ({ g, inPeriod: s.savedByGoal[g.id] || 0 }))
     .sort((a, b) => b.inPeriod - a.inPeriod);
   const goalsHtml = !goalRows.length ? emptyNote('Nog geen spaardoelen.') : `
     <div class="flex items-center justify-between text-sm goal-bg rounded-xl px-3.5 py-2.5 mb-3">
@@ -629,13 +637,13 @@ function renderAnalysis() {
       return `
       <div>
         <div class="flex items-center justify-between text-sm">
-          <span class="font-medium text-slate-800 truncate">🎯 ${escapeHtml(g.name)}</span>
+          <span class="font-medium text-slate-800 truncate">🎯 ${escapeHtml(g.name)}${isGoalDeleted(g) ? ' <span class="goal-deleted-label text-xs font-normal text-slate-400">(verwijderd)</span>' : ''}</span>
           <span class="text-xs tabular-nums shrink-0 ${inPeriod > 0 ? 'goal-text font-semibold' : inPeriod < 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'}">${inPeriod > 0 ? '+' + formatMoney(inPeriod) : inPeriod < 0 ? '−' + formatMoney(-inPeriod) + ' opgenomen' : 'niets gestort'}</span>
         </div>
         <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden mt-1.5"><div class="h-full rounded-full goal-bar" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="flex justify-between text-xs mt-1 tabular-nums">
-          <span class="text-slate-500">Nu ${formatMoney(g.current)} van ${formatMoney(g.target)}</span>
-          <span class="text-slate-400">${formatPct(pct)}</span>
+          <span class="text-slate-500">${isGoalDeleted(g) ? 'Verwijderd' + (g.deletedAt ? ' op ' + formatLongDate(toYmd(new Date(g.deletedAt))) : '') : `Nu ${formatMoney(g.current)} van ${formatMoney(g.target)}`}</span>
+          <span class="text-slate-400">${isGoalDeleted(g) ? '' : formatPct(pct)}</span>
         </div>
       </div>`; }).join('')}</div>`;
 
@@ -954,7 +962,8 @@ function renderGoals() {
   const list = document.getElementById('goals-list');
   const empty = document.getElementById('no-goals');
 
-  if (state.goals.length === 0) {
+  const goals = activeGoals();
+  if (goals.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
     return;
@@ -967,7 +976,7 @@ function renderGoals() {
         <span class="goal-text">🎯 Deze periode naar spaardoelen<span class="block text-xs goal-text-soft">Gaat van je beschikbaar saldo af · staat los van je potjes</span></span>
         <span class="font-semibold tabular-nums goal-text whitespace-nowrap shrink-0 ml-1">${periodTotal < 0 ? '+' + formatMoney(-periodTotal) : '−' + formatMoney(periodTotal)}</span>
       </div>`;
-  list.innerHTML = summary + state.goals.map((g, i) => {
+  list.innerHTML = summary + goals.map((g, i) => {
     const pct = Math.min(100, Math.round((g.current / g.target) * 100));
     return `
       <div class="item-enter bg-white rounded-2xl p-4 shadow-card border border-slate-100/60" style="animation-delay: ${i * 40}ms">
@@ -1235,7 +1244,7 @@ function addGoal(e) {
 // Spaardoel bewerken: naam, doelbedrag en 'Elke periode resetten'. Het gespaarde bedrag verander je met + / − Geld.
 let editingGoalId = null;
 function openEditGoal(id) {
-  const goal = state.goals.find(g => g.id === id);
+  const goal = findActiveGoal(id);
   if (!goal) return;
   editingGoalId = id;
   const form = document.getElementById('edit-goal-form');
@@ -1257,7 +1266,7 @@ function setGoalResetEachPeriod(goal, on) {
 function saveGoalEdit(e) {
   e.preventDefault();
   const form = e.target;
-  const goal = state.goals.find(g => g.id === editingGoalId);
+  const goal = findActiveGoal(editingGoalId);
   if (!goal) { closeModal(); return; }
   const name = form.name.value.trim();
   const target = parseFloat(String(form.target.value).replace(',', '.'));
@@ -1274,6 +1283,29 @@ function saveGoalEdit(e) {
   const nowOn = goalResetsEnabled(goal);
   showToast(nowOn && !wasOn ? `🔁 Reset vanaf ${formatLongDate(nextPeriodStartAfter(getCurrentPeriodStart()))} ✓`
     : !nowOn && wasOn ? 'Resetten uitgezet ✓' : 'Spaardoel opgeslagen ✓');
+}
+
+// v33: spaardoel verwijderen (zacht). Wat er nog in staat, gaat eerst als opname terug naar het beschikbaar
+// saldo (precies zoals '− Geld'); daarna wordt het doel gemarkeerd als verwijderd. Eerdere stortingen blijven
+// in het logboek, zodat saldo en eerdere periodes in Analyse niet veranderen.
+function deleteGoal() {
+  const goal = findActiveGoal(editingGoalId);
+  if (!goal) { closeModal(); return; }
+  const left = Math.round((goal.current || 0) * 100) / 100;
+  const msg = `Spaardoel "${goal.name}" verwijderen?` + (left > 0
+    ? `\n\nEr staat ${formatMoney(left)} in "${goal.name}". Dat komt terug op je beschikbaar saldo.`
+    : '') + `\n\nEerdere stortingen blijven zichtbaar in Analyse.`;
+  if (!confirm(msg)) return;
+  if (left > 0) logGoalTransfer(goal, -left);
+  goal.current = 0;
+  goal.deleted = true;
+  goal.deletedAt = new Date().toISOString();
+  saveState();
+  render();
+  closeModal({ keepScroll: true });
+  editingGoalId = null;
+  showToast(left > 0 ? `Spaardoel verwijderd · ${formatMoney(left)} terug naar je saldo ✓` : 'Spaardoel verwijderd ✓');
+  haptic(10);
 }
 
 // Categorieën hebben een soort: alleen uitgave, alleen inkomst, of beide (staat dan in beide lijsten).
@@ -1415,7 +1447,7 @@ function logGoalTransfer(goal, amount) {
 
 // Geld naar een spaardoel: gaat van het beschikbaar saldo af (zie getAvailableBalance).
 function addToGoal(id) {
-  const goal = state.goals.find(g => g.id === id);
+  const goal = findActiveGoal(id);
   if (!goal) return;
   const amount = prompt(`Hoeveel wil je naar "${goal.name}" overmaken?\nDit gaat van je beschikbaar saldo af.`);
   if (amount === null) return;
@@ -1435,7 +1467,7 @@ function addToGoal(id) {
 
 // Geld uit een spaardoel halen: komt terug op het beschikbaar saldo.
 function withdrawFromGoal(id) {
-  const goal = state.goals.find(g => g.id === id);
+  const goal = findActiveGoal(id);
   if (!goal) return;
   const amount = prompt(`Hoeveel wil je uit "${goal.name}" halen? (max ${formatMoney(goal.current)})\nDit komt terug op je beschikbaar saldo.`);
   if (amount === null) return;
@@ -1982,7 +2014,9 @@ function validateBackup(data) {
   if ((data.goals || []).some(g => !g || typeof g.current !== 'number' || typeof g.target !== 'number' ||
     (g.deposits != null && (!Array.isArray(g.deposits) || g.deposits.some(d => !d || typeof d.amount !== 'number' || !isFinite(d.amount) || isNaN(new Date(d.date).getTime())))) ||
     (g.resetEachPeriod != null && typeof g.resetEachPeriod !== 'boolean') ||
-    (g.lastResetPeriod != null && (typeof g.lastResetPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.lastResetPeriod))))) return 'De back-up bevat een ongeldig spaardoel.';
+    (g.lastResetPeriod != null && (typeof g.lastResetPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.lastResetPeriod))) ||
+    (g.deleted != null && typeof g.deleted !== 'boolean') ||
+    (g.deletedAt != null && (typeof g.deletedAt !== 'string' || isNaN(new Date(g.deletedAt).getTime()))))) return 'De back-up bevat een ongeldig spaardoel.';
   if (typeof data.version === 'number' && data.version > DATA_VERSION) return 'Deze back-up komt uit een nieuwere versie van de app.';
   return null;
 }
@@ -2041,7 +2075,7 @@ function markBackupDone() {
 }
 
 function backupReminderDue() {
-  const hasData = state.transactions.length || state.pots.length || state.goals.length;
+  const hasData = state.transactions.length || state.pots.length || activeGoals().length;
   if (!hasData) return false;
   const now = Date.now();
   const dismissed = Date.parse(localStorage.getItem(BACKUP_DISMISS_KEY) || '');
