@@ -191,6 +191,8 @@
     .after-pots-amount.is-negative { display: inline-block; background: #fff1f2; color: #e11d48; font-weight: 700; padding: 0 .45rem; border-radius: 9999px; }
     html[data-theme=dark] .after-pots-amount.is-negative { background: rgba(255,241,242,.95); color: #be123c; }
     #available-balance.balance-neg { color: #fecdd3; }
+    /* v32: aan/uit-schakelaars ook in donkere modus groen als ze aan staan (bg-slate-300 had !important) */
+    html[data-theme=dark] .peer:checked ~ .peer-checked\:bg-emerald-500 { background-color: #10b981 !important; }
     html[data-theme=dark] .goal-text-soft { color: rgba(94,234,212,.75) !important; }
     html[data-theme=dark] .goal-bg { background-color: rgba(20,184,166,.15) !important; }
     html[data-theme=dark] input, html[data-theme=dark] select, html[data-theme=dark] textarea { color: #e2e8f0; }
@@ -628,9 +630,56 @@
             </div>
             <p class="text-xs text-slate-400 mt-1.5">Dit startbedrag gaat niet van je saldo af. Geld dat je later met <span class="font-semibold">+ Geld</span> toevoegt wel.</p>
           </div>
+          <label class="flex items-center justify-between gap-3 bg-slate-50 rounded-2xl px-4 py-3.5 cursor-pointer">
+            <span>
+              <span class="block font-medium text-slate-800">🔁 Elke periode resetten</span>
+              <span class="block text-xs text-slate-400">Op je betaaldag gaat het gespaarde bedrag terug naar € 0. Het komt niet terug op je saldo.</span>
+            </span>
+            <input type="checkbox" name="resetEachPeriod" class="peer sr-only">
+            <span class="relative w-12 h-7 shrink-0 rounded-full bg-slate-300 transition peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-6 after:h-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5"></span>
+          </label>
           <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25 mt-2">
             Spaardoel aanmaken
           </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Goal (v32) -->
+  <div id="modal-edit-goal" class="modal fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto" data-no-autofocus>
+    <div class="bg-white rounded-t-3xl shadow-2xl safe-bottom">
+      <div class="flex justify-center pt-3 pb-1">
+        <div class="w-10 h-1 rounded-full bg-slate-200"></div>
+      </div>
+      <div class="px-5 pt-2 pb-6">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-lg font-bold text-slate-900">Spaardoel bewerken</h3>
+          <button onclick="cancelModal()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+        </div>
+        <form id="edit-goal-form" onsubmit="saveGoalEdit(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Naam</label>
+            <input type="text" name="name" required
+                   class="w-full px-4 py-3.5 bg-slate-50 border-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand-500/40">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Doelbedrag</label>
+            <div class="relative">
+              <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">€</span>
+              <input type="number" step="0.01" min="0.01" required name="target" inputmode="decimal"
+                     class="w-full pl-10 pr-4 py-3.5 bg-slate-50 border-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand-500/40">
+            </div>
+          </div>
+          <label class="flex items-center justify-between gap-3 bg-slate-50 rounded-2xl px-4 py-3.5 cursor-pointer">
+            <span>
+              <span class="block font-medium text-slate-800">🔁 Elke periode resetten</span>
+              <span class="block text-xs text-slate-400">Op je betaaldag gaat het gespaarde bedrag terug naar € 0. Het komt niet terug op je saldo. De eerste keer is op je volgende betaaldag.</span>
+            </span>
+            <input type="checkbox" name="resetEachPeriod" class="peer sr-only">
+            <span class="relative w-12 h-7 shrink-0 rounded-full bg-slate-300 transition peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-6 after:h-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5"></span>
+          </label>
+          <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25 mt-2">Opslaan</button>
         </form>
       </div>
     </div>

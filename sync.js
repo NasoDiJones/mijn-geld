@@ -49,6 +49,7 @@
       if (typeof ensurePeriodDefaults === 'function') ensurePeriodDefaults();
       if (typeof repairRecurringData === 'function') repairRecurringData();
       if (typeof runAutoBooking === 'function') runAutoBooking();
+      if (typeof runGoalResets === 'function') runGoalResets(); // geen toast: die kwam al bij het openen
       localStorage.setItem('mijnGeldApp', JSON.stringify(window.mgGetState ? window.mgGetState() : JSON.parse(localRaw())));
       if (typeof render === 'function') render();
     } finally { applying = false; }
@@ -96,7 +97,23 @@
       applyRemote(remote.data);
       meta.lastSyncedAt = remote.updated_at; writeMeta();
     }
+    goalResetsAfterPull();
+    if (typeof window.mgTakeGoalResetPending === 'function' && window.mgTakeGoalResetPending()) return upload();
     setStatus('ok');
+  }
+
+  // v32: spaardoelen met 'Elke periode resetten' pas resetten ná het ophalen van de nieuwste gegevens,
+  // zodat een verouderde lokale versie nooit de cloud overschrijft. Hooguit één keer per periode (lastResetPeriod).
+  function goalResetsAfterPull() {
+    if (typeof runGoalResets !== 'function') return;
+    var gr = runGoalResets();
+    if (!gr.length) return;
+    applying = true;
+    try {
+      localStorage.setItem('mijnGeldApp', JSON.stringify(window.mgGetState ? window.mgGetState() : JSON.parse(localRaw())));
+      if (typeof render === 'function') render();
+      if (typeof goalResetToast === 'function') goalResetToast(gr);
+    } finally { applying = false; }
   }
 
   async function afterLogin() {
@@ -327,6 +344,7 @@
     assistantRefresh();
   };
 
+  window.mgSyncActive = function () { return !!(client && user && meta.initialized); };
   window.mgSyncNow = function () { if (meta.dirty) return safe(upload); return syncNow(); };
 
   window.mgSyncLogout = async function () {

@@ -232,6 +232,48 @@ function getGoalTransfersThisPeriod() {
   return getGoalTransfersTotal(state.lastPeriodStart);
 }
 
+// ==================== SPAARDOEL ELKE PERIODE RESETTEN (v32) ====================
+// Een spaardoel met resetEachPeriod === true gaat op de betaaldag (start van een nieuwe periode volgens de
+// startdag, dus automatisch, ook als je de nieuwe periode nog niet via de banner hebt gestart) terug naar € 0.
+// - Het geld komt NIET terug op het beschikbaar saldo en de reset wordt NIET als opname in goal.deposits
+//   gelogd: saldo, 'Deze periode naar spaardoelen' en Analyse blijven dus precies gelijk.
+// - goal.lastResetPeriod (YYYY-MM-DD, startdatum van de periode) zorgt dat het hooguit één keer per periode
+//   gebeurt: ook na meerdere gemiste periodes (dan één reset), bij later openen en op meerdere toestellen.
+// - Aanzetten zet lastResetPeriod op de lopende periode: de eerste reset is dus pas op de volgende betaaldag.
+let goalResetUnsynced = false;
+function goalResetsEnabled(g) { return !!(g && g.resetEachPeriod === true); }
+
+function runGoalResets(now = new Date()) {
+  const period = getCurrentPeriodStart(now);
+  const resets = [];
+  (state.goals || []).forEach(g => {
+    if (!goalResetsEnabled(g)) return;
+    if (typeof g.lastResetPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.lastResetPeriod)) {
+      g.lastResetPeriod = period; // oude/geïmporteerde data zonder markering: niet meteen resetten
+      return;
+    }
+    if (g.lastResetPeriod >= period) return;
+    const amount = Math.round((g.current || 0) * 100) / 100;
+    g.current = 0;
+    g.lastResetPeriod = period;
+    g.lastResetAmount = amount;
+    resets.push({ goal: g, amount });
+  });
+  if (resets.length) goalResetUnsynced = true;
+  return resets;
+}
+
+// Voor sync.js: is er een reset gedaan die nog niet naar de cloud is? (leest en wist de vlag)
+if (typeof window !== 'undefined') window.mgTakeGoalResetPending = () => { const v = goalResetUnsynced; goalResetUnsynced = false; return v; };
+
+function goalResetToast(resets) {
+  if (!resets.length) return;
+  const msg = resets.length === 1
+    ? `🔁 Nieuwe periode: "${resets[0].goal.name}" staat weer op ${formatMoney(0)}`
+    : `🔁 Nieuwe periode: ${resets.length} spaardoelen staan weer op ${formatMoney(0)}`;
+  setTimeout(() => showToast(msg), 1200);
+}
+
 // Wat er vrij te besteden is na aftrek van het geld in potjes.
 function getBalanceAfterPots() {
   return Math.round((getAvailableBalance() - getPotsTotal()) * 100) / 100;
@@ -778,6 +820,7 @@ function startNewPeriod(e) {
     pot.balance = value;
   });
   state.lastPeriodStart = newStart;
+  goalResetToast(runGoalResets()); // meestal al gebeurd op de betaaldag; hooguit één keer per periode
   sessionStorage.removeItem('periodBannerDismissed');
   saveState();
   render();
@@ -929,8 +972,12 @@ function renderGoals() {
     return `
       <div class="item-enter bg-white rounded-2xl p-4 shadow-card border border-slate-100/60" style="animation-delay: ${i * 40}ms">
         <div class="flex items-center justify-between mb-3 gap-2">
-          <p class="font-semibold text-slate-900 min-w-0 truncate">${escapeHtml(g.name)}</p>
+          <div class="min-w-0">
+            <p class="font-semibold text-slate-900 truncate">${escapeHtml(g.name)}</p>
+            ${goalResetsEnabled(g) ? `<span class="goal-reset-badge goal-text goal-bg inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1">🔁 reset elke periode</span>` : ''}
+          </div>
           <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="openEditGoal('${g.id}')" aria-label="Spaardoel bewerken" title="Bewerken" class="goal-edit-btn text-sm text-slate-400 bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center pressable">✎</button>
             ${g.current > 0 ? `<button onclick="withdrawFromGoal('${g.id}')" class="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full pressable">− Geld</button>` : ''}
             <button onclick="addToGoal('${g.id}')" class="text-xs font-semibold goal-text goal-bg px-3 py-1.5 rounded-full pressable">+ Geld</button>
           </div>
@@ -943,6 +990,7 @@ function renderGoals() {
           <div class="progress-bar h-full goal-bar rounded-full" style="width: ${pct}%"></div>
         </div>
         <p class="text-xs mt-2 ${pct >= 100 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}">${pct >= 100 ? '🎉 Doel bereikt!' : pct + '% bereikt'}</p>
+        ${goalResetsEnabled(g) && g.lastResetPeriod === getCurrentPeriodStart() && g.lastResetAmount > 0 ? `<p class="goal-reset-note text-[11px] text-slate-400 mt-1">Op ${formatLongDate(g.lastResetPeriod)} teruggezet (er stond ${formatMoney(g.lastResetAmount)})</p>` : ''}
       </div>
     `;
   }).join('');
@@ -1170,13 +1218,62 @@ function addGoal(e) {
   const name = form.name.value.trim();
   const target = parseFloat(form.target.value);
   const current = parseFloat(form.current.value) || 0;
+  const goal = { id: uid(), name, target, current };
+  if (form.resetEachPeriod && form.resetEachPeriod.checked) {
+    goal.resetEachPeriod = true;
+    goal.lastResetPeriod = getCurrentPeriodStart(); // eerste reset op de volgende betaaldag
+  }
 
-  state.goals.push({ id: uid(), name, target, current });
+  state.goals.push(goal);
   saveState();
   render();
   closeModal();
   form.reset();
   switchTab('goals');
+}
+
+// Spaardoel bewerken: naam, doelbedrag en 'Elke periode resetten'. Het gespaarde bedrag verander je met + / − Geld.
+let editingGoalId = null;
+function openEditGoal(id) {
+  const goal = state.goals.find(g => g.id === id);
+  if (!goal) return;
+  editingGoalId = id;
+  const form = document.getElementById('edit-goal-form');
+  form.name.value = goal.name;
+  form.target.value = goal.target;
+  form.resetEachPeriod.checked = goalResetsEnabled(goal);
+  openModal('edit-goal');
+}
+
+function setGoalResetEachPeriod(goal, on) {
+  if (on && !goalResetsEnabled(goal)) {
+    goal.resetEachPeriod = true;
+    goal.lastResetPeriod = getCurrentPeriodStart(); // niet meteen resetten, pas op de volgende betaaldag
+  } else if (!on && goalResetsEnabled(goal)) {
+    goal.resetEachPeriod = false;
+  }
+}
+
+function saveGoalEdit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const goal = state.goals.find(g => g.id === editingGoalId);
+  if (!goal) { closeModal(); return; }
+  const name = form.name.value.trim();
+  const target = parseFloat(String(form.target.value).replace(',', '.'));
+  if (!name) return alert('Vul een naam in.');
+  if (isNaN(target) || target <= 0) return alert('Vul een geldig doelbedrag in.');
+  const wasOn = goalResetsEnabled(goal);
+  goal.name = name;
+  goal.target = Math.round(target * 100) / 100;
+  setGoalResetEachPeriod(goal, form.resetEachPeriod.checked);
+  saveState();
+  render();
+  closeModal({ keepScroll: true });
+  editingGoalId = null;
+  const nowOn = goalResetsEnabled(goal);
+  showToast(nowOn && !wasOn ? `🔁 Reset vanaf ${formatLongDate(nextPeriodStartAfter(getCurrentPeriodStart()))} ✓`
+    : !nowOn && wasOn ? 'Resetten uitgezet ✓' : 'Spaardoel opgeslagen ✓');
 }
 
 // Categorieën hebben een soort: alleen uitgave, alleen inkomst, of beide (staat dan in beide lijsten).
@@ -1883,7 +1980,9 @@ function validateBackup(data) {
   if (badTx) return 'De back-up bevat een ongeldige transactie.';
   if ((data.pots || []).some(pt => !pt || typeof pt.balance !== 'number')) return 'De back-up bevat een ongeldig potje.';
   if ((data.goals || []).some(g => !g || typeof g.current !== 'number' || typeof g.target !== 'number' ||
-    (g.deposits != null && (!Array.isArray(g.deposits) || g.deposits.some(d => !d || typeof d.amount !== 'number' || !isFinite(d.amount) || isNaN(new Date(d.date).getTime())))))) return 'De back-up bevat een ongeldig spaardoel.';
+    (g.deposits != null && (!Array.isArray(g.deposits) || g.deposits.some(d => !d || typeof d.amount !== 'number' || !isFinite(d.amount) || isNaN(new Date(d.date).getTime())))) ||
+    (g.resetEachPeriod != null && typeof g.resetEachPeriod !== 'boolean') ||
+    (g.lastResetPeriod != null && (typeof g.lastResetPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(g.lastResetPeriod))))) return 'De back-up bevat een ongeldig spaardoel.';
   if (typeof data.version === 'number' && data.version > DATA_VERSION) return 'Deze back-up komt uit een nieuwere versie van de app.';
   return null;
 }
@@ -1907,6 +2006,7 @@ function importBackupText(text) {
     ensurePeriodDefaults();
     repairRecurringData();
     runAutoBooking();
+    goalResetToast(runGoalResets());
     saveState();
   } catch (e) {
     console.error('Import mislukt', e);
@@ -2111,7 +2211,10 @@ loadState();
 ensurePeriodDefaults();
 const repairedDuplicates = repairRecurringData();
 runAutoBooking();
+const startupGoalResets = runGoalResets();
+if (startupGoalResets.length) saveState(); // sync.js is dan nog niet geladen; die uploadt de reset na het ophalen
 render();
+goalResetToast(startupGoalResets);
 if (repairedDuplicates.length) {
   setTimeout(() => showToast(repairedDuplicates.length === 1
     ? '1 dubbele vaste last hersteld ✓'
@@ -2120,7 +2223,15 @@ if (repairedDuplicates.length) {
 // Controleer opnieuw als de app terugkomt uit de achtergrond (bijv. de volgende dag).
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  if (runAutoBooking()) render();
+  let changed = runAutoBooking();
+  // Met cloud-sync doet sync.js de reset ná het ophalen van de nieuwste gegevens (anders kan een
+  // verouderde lokale versie de cloud overschrijven). Zonder sync (of offline) gebeurt het hier.
+  const syncHandles = typeof window.mgSyncActive === 'function' && window.mgSyncActive() && navigator.onLine !== false;
+  if (!syncHandles) {
+    const resets = runGoalResets();
+    if (resets.length) { saveState(); goalResetToast(resets); changed = true; }
+  }
+  if (changed) render();
   renderPeriodBanner();
 });
 
