@@ -44,7 +44,8 @@ function loadState() {
         recurring: Array.isArray(parsed.recurring) ? parsed.recurring : []
       };
       ensurePeriodDefaults();
-      if (parsed.version !== DATA_VERSION) saveState();
+      const undone = undoGoalDeleteRefunds();
+      if (parsed.version !== DATA_VERSION || undone.length) saveState();
     } catch (e) {
       console.error('Kon data niet laden', e);
     }
@@ -312,6 +313,36 @@ function getFreeToSpend(upcoming = getUpcomingRecurring()) {
 // v33: verwijderde spaardoelen (goal.deleted === true) blijven in state.goals staan zodat hun stortingen
 // in eerdere periodes (saldo, Analyse) blijven meetellen, maar ze zijn verder overal onzichtbaar.
 function isGoalDeleted(g) { return !!(g && g.deleted === true); }
+
+// v34: bij verwijderen komt wat er nog in een spaardoel staat NIET meer terug op het beschikbaar saldo
+// (net als bij 'Elke periode resetten': gespaard geld blijft gespaard). v33 logde dat restbedrag wel als
+// opname (negatief bedrag in goal.deposits, aangemaakt in dezelfde handeling vlak vóór goal.deletedAt).
+// Deze eenmalige herstelstap haalt precies die ene automatische opname weg. Herkenning: doel is verwijderd,
+// heeft nog geen markering deleteRefundUndone, en heeft een opname (< 0) waarvan de datum hooguit 5 s vóór/na
+// deletedAt ligt (de laatste zo'n opname). Daarna wordt goal.deleteRefundUndone = bedrag gezet, zodat het
+// nooit twee keer gebeurt (ook niet na sync of import). Gewone opnames ('− Geld') eerder blijven ongemoeid.
+const DELETE_REFUND_WINDOW_MS = 5000;
+function undoGoalDeleteRefunds() {
+  const fixed = [];
+  (state.goals || []).forEach(g => {
+    if (!isGoalDeleted(g) || g.deleteRefundUndone != null || !Array.isArray(g.deposits)) return;
+    const delMs = new Date(g.deletedAt).getTime();
+    if (isNaN(delMs)) return;
+    let idx = -1;
+    g.deposits.forEach((d, i) => {
+      if (!d || typeof d.amount !== 'number' || !(d.amount < 0)) return;
+      const ms = new Date(d.date).getTime();
+      if (!isNaN(ms) && Math.abs(delMs - ms) <= DELETE_REFUND_WINDOW_MS) idx = i;
+    });
+    if (idx < 0) return;
+    const amount = Math.round(-g.deposits[idx].amount * 100) / 100;
+    g.deposits.splice(idx, 1);
+    g.deleteRefundUndone = amount;
+    fixed.push({ goal: g, amount });
+  });
+  if (fixed.length) goalResetUnsynced = true; // sync.js uploadt dit na het ophalen (zelfde vlag als de reset)
+  return fixed;
+}
 function activeGoals() { return (state.goals || []).filter(g => g && !isGoalDeleted(g)); }
 function findActiveGoal(id) { return activeGoals().find(g => g.id === id); }
 
@@ -1285,18 +1316,17 @@ function saveGoalEdit(e) {
     : !nowOn && wasOn ? 'Resetten uitgezet ✓' : 'Spaardoel opgeslagen ✓');
 }
 
-// v33: spaardoel verwijderen (zacht). Wat er nog in staat, gaat eerst als opname terug naar het beschikbaar
-// saldo (precies zoals '− Geld'); daarna wordt het doel gemarkeerd als verwijderd. Eerdere stortingen blijven
-// in het logboek, zodat saldo en eerdere periodes in Analyse niet veranderen.
+// v33/v34: spaardoel verwijderen (zacht). Sinds v34 komt wat er nog in staat NIET terug op het beschikbaar
+// saldo (geen opname in het logboek); het doel wordt alleen gemarkeerd als verwijderd. Eerdere stortingen
+// blijven in het logboek, zodat saldo en Analyse niet veranderen. Wil je het geld wel terug: eerst '− Geld'.
 function deleteGoal() {
   const goal = findActiveGoal(editingGoalId);
   if (!goal) { closeModal(); return; }
   const left = Math.round((goal.current || 0) * 100) / 100;
   const msg = `Spaardoel "${goal.name}" verwijderen?` + (left > 0
-    ? `\n\nEr staat ${formatMoney(left)} in "${goal.name}". Dat komt terug op je beschikbaar saldo.`
+    ? `\n\nEr staat ${formatMoney(left)} in "${goal.name}". Dat blijft gespaard en komt niet terug op je beschikbaar saldo (wil je dat wel, haal het dan eerst weg met '− Geld').`
     : '') + `\n\nEerdere stortingen blijven zichtbaar in Analyse.`;
   if (!confirm(msg)) return;
-  if (left > 0) logGoalTransfer(goal, -left);
   goal.current = 0;
   goal.deleted = true;
   goal.deletedAt = new Date().toISOString();
@@ -1304,7 +1334,7 @@ function deleteGoal() {
   render();
   closeModal({ keepScroll: true });
   editingGoalId = null;
-  showToast(left > 0 ? `Spaardoel verwijderd · ${formatMoney(left)} terug naar je saldo ✓` : 'Spaardoel verwijderd ✓');
+  showToast('Spaardoel verwijderd ✓');
   haptic(10);
 }
 
