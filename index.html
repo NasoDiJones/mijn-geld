@@ -1054,7 +1054,7 @@
           <div id="bi-intro">
             <p class="text-sm text-slate-500">Kies een export van je bank. Je ziet eerst een overzicht en kiest zelf wat erin komt. Het bestand wordt alleen op dit toestel gelezen en niet geüpload of bewaard.</p>
             <button type="button" onclick="biPickFile()" class="w-full mt-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25">📄 Kies bestand</button>
-            <input type="file" id="bank-file" multiple accept=".csv,.txt,.tab,.xml,.sta,.940,.mt940,.053,text/csv,text/plain,text/xml,application/xml,text/comma-separated-values,application/vnd.ms-excel" class="hidden" onchange="biHandleFiles(this)">
+            <input type="file" id="bank-file" multiple class="hidden" onchange="biHandleFiles(this)">
             <p id="bi-error" class="hidden bi-error"></p>
             <div class="bg-slate-50 rounded-2xl p-4 mt-4 text-sm text-slate-600 bi-help">
               <p class="font-semibold text-slate-800">Welke bestanden?</p>
