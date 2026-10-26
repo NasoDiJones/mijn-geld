@@ -228,6 +228,31 @@
     #app-header { position: relative !important; top: auto; z-index: 30; }
     #app { padding-top: 0 !important; }
     html[data-theme=dark] #app-header .hdr-safe { background:#0f172a; }
+    /* v35: bankbestand importeren */
+    .bi-row { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; cursor:pointer; transition:opacity .15s; }
+    .bi-row.bi-off { opacity:.55; }
+    .bi-check { margin-top:2px; }
+    .bi-line { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .bi-warn { font-size:12px; line-height:1.35; color:#d97706; margin-top:4px; }
+    .bi-info { font-size:12px; line-height:1.35; color:#4f46e5; margin-top:4px; }
+    .bi-src { font-size:11px; color:#94a3b8; margin-top:4px; }
+    .bi-selects { display:flex; gap:8px; margin-top:8px; }
+    .bi-select { flex:1; min-width:0; width:100%; padding:8px 10px; border-radius:12px; border:1px solid #e2e8f0; background:#fff; font-size:14px; -webkit-appearance:none; appearance:none; }
+    .bi-maplabel { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:600; color:#475569; }
+    .bi-maplabel .bi-select { margin-top:2px; font-weight:400; }
+    .bi-mapprev { overflow-x:auto; font-size:11px; color:#64748b; background:#f8fafc; border-radius:12px; padding:8px; }
+    .bi-maprow { display:flex; gap:10px; white-space:nowrap; padding:2px 0; }
+    .bi-maprow span { min-width:60px; }
+    .bi-chip { font-size:13px; font-weight:600; padding:6px 14px; border-radius:999px; background:#eef2ff; color:#4338ca; }
+    .bi-error { margin-top:12px; font-size:14px; color:#e11d48; background:#fff1f2; border-radius:14px; padding:10px 14px; }
+    .bi-help p { line-height:1.45; }
+    html[data-theme=dark] .bi-select { background:#1e293b; border-color:#334155; color:#e2e8f0; }
+    html[data-theme=dark] .bi-mapprev { background:#0f172a; color:#94a3b8; }
+    html[data-theme=dark] .bi-chip { background:rgba(99,102,241,.18); color:#a5b4fc; }
+    html[data-theme=dark] .bi-error { background:rgba(244,63,94,.15); color:#fb7185; }
+    html[data-theme=dark] .bi-warn { color:#fbbf24; }
+    html[data-theme=dark] .bi-info { color:#a5b4fc; }
+    html[data-theme=dark] .bi-maplabel { color:#cbd5e1; }
   </style>
   <script>
     (function(){try{var t=localStorage.getItem('mijnGeld.theme')||'auto';var d=t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();
@@ -448,6 +473,7 @@
           <button type="submit" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-rose-500/20 mt-2">
             Uitgave opslaan
           </button>
+        <button type="button" onclick="openBankImport()" class="w-full py-2 text-sm font-medium text-brand-600 pressable">🏦 Of importeer een bankbestand</button>
         </form>
       </div>
     </div>
@@ -545,6 +571,7 @@
           <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-emerald-500/20 mt-2">
             Inkomst opslaan
           </button>
+        <button type="button" onclick="openBankImport()" class="w-full py-2 text-sm font-medium text-brand-600 pressable">🏦 Of importeer een bankbestand</button>
         </form>
       </div>
     </div>
@@ -748,6 +775,9 @@
         <div class="space-y-2">
           <button onclick="openRecurring()" class="w-full flex items-center gap-3 px-4 py-3.5 bg-slate-50 rounded-2xl font-medium pressable text-left">
             <span class="text-xl">📅</span> <span class="flex-1">Vaste lasten</span><span class="text-xs text-slate-400 tabular-nums" id="settings-recurring-count"></span>
+          </button>
+          <button onclick="openBankImport()" class="w-full flex items-center gap-3 px-4 py-3.5 bg-slate-50 rounded-2xl font-medium pressable text-left">
+            <span class="text-xl">🏦</span> <span class="flex-1">Bankbestand importeren</span><span class="text-xs text-slate-400">CSV/XML</span>
           </button>
           <button onclick="exportData()" class="w-full flex items-center gap-3 px-4 py-3.5 bg-slate-50 rounded-2xl font-medium pressable text-left">
             <span class="text-xl">📤</span> Data exporteren
@@ -1005,10 +1035,84 @@
     </div>
   </div>
 
+
+  <!-- v35: Bankbestand importeren -->
+  <div id="modal-bank-import" data-no-autofocus class="modal fixed bottom-0 left-0 right-0 z-50 max-w-lg mx-auto">
+    <div class="bg-white rounded-t-3xl shadow-2xl safe-bottom max-h-[88vh] flex flex-col">
+      <div class="flex justify-center pt-3 pb-1">
+        <div class="w-10 h-1 rounded-full bg-slate-200"></div>
+      </div>
+      <form onsubmit="biConfirm(event)" class="flex flex-col min-h-0">
+        <div class="px-5 pt-2 pb-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-bold text-slate-900">🏦 Bankbestand importeren</h3>
+            <button type="button" onclick="biClose()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 pressable">✕</button>
+          </div>
+        </div>
+        <div class="px-5 overflow-y-auto flex-1 pb-4">
+          <!-- Stap 1: bestand kiezen -->
+          <div id="bi-intro">
+            <p class="text-sm text-slate-500">Kies een export van je bank. Je ziet eerst een overzicht en kiest zelf wat erin komt. Het bestand wordt alleen op dit toestel gelezen en niet geüpload of bewaard.</p>
+            <button type="button" onclick="biPickFile()" class="w-full mt-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25">📄 Kies bestand</button>
+            <input type="file" id="bank-file" multiple accept=".csv,.txt,.tab,.xml,.sta,.940,.mt940,.053,text/csv,text/plain,text/xml,application/xml,text/comma-separated-values,application/vnd.ms-excel" class="hidden" onchange="biHandleFiles(this)">
+            <p id="bi-error" class="hidden bi-error"></p>
+            <div class="bg-slate-50 rounded-2xl p-4 mt-4 text-sm text-slate-600 bi-help">
+              <p class="font-semibold text-slate-800">Welke bestanden?</p>
+              <p class="mt-1">CSV van o.a. ING (NL en BE), Rabobank, ABN AMRO (TXT), bunq, KBC, Belfius, BNP Paribas Fortis en Argenta. Ook CAMT.053 (XML) en MT940. Geen PDF: kies bij je bank <b>CSV</b> als formaat. Herkent de app je bestand niet, dan wijs je zelf de kolommen aan.</p>
+              <p class="font-semibold text-slate-800 mt-3">CSV downloaden bij ING</p>
+              <p class="mt-1"><b>ING België:</b> open je rekening in ING Home'Bank of de ING Banking-app en zoek de optie om je verrichtingen te downloaden of exporteren. Kies <b>CSV</b>.</p>
+              <p class="mt-1"><b>ING Nederland:</b> in Mijn ING kies je ‘Af- en bijschrijvingen downloaden’ met als formaat <b>(punt)kommagescheiden CSV</b>. Dat gaat het makkelijkst via de website; in de app kun je vaak alleen een PDF downloaden.</p>
+              <p class="mt-3 text-xs text-slate-400">Op je iPhone: bewaar het bestand in de app Bestanden, en kies het daarna hier.</p>
+            </div>
+          </div>
+          <!-- Stap 1b: kolommen aanwijzen -->
+          <div id="bi-mapping" class="hidden">
+            <p class="text-sm text-slate-500">Het formaat van <span id="bi-map-file" class="font-semibold"></span> werd niet herkend. Wijs aan welke kolom wat is.</p>
+            <div class="bi-mapprev mt-3" id="bi-map-preview"></div>
+            <div class="space-y-3 mt-4">
+              <label class="bi-maplabel">Datum *<select id="bi-map-date" class="bi-select"></select></label>
+              <label class="bi-maplabel">Bedrag * <span class="text-xs text-slate-400">(min = uitgave)</span><select id="bi-map-amount" class="bi-select"></select></label>
+              <label class="bi-maplabel">Af/Bij-kolom <span class="text-xs text-slate-400">(als het bedrag geen min-teken heeft)</span><select id="bi-map-sign" class="bi-select"></select></label>
+              <label class="bi-maplabel">Omschrijving<select id="bi-map-desc" class="bi-select"></select></label>
+              <label class="bi-maplabel">Tegenpartij (naam)<select id="bi-map-name" class="bi-select"></select></label>
+              <label class="flex items-center gap-3 text-sm text-slate-600"><input type="checkbox" id="bi-map-header" class="w-5 h-5 rounded-md accent-indigo-600"> Bovenaan staat een regel met kolomnamen</label>
+            </div>
+            <button type="button" onclick="biApplyMapping(event)" class="w-full mt-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition">Verder</button>
+            <button type="button" onclick="openBankImport()" class="w-full mt-2 py-3 text-slate-500 font-medium pressable">Ander bestand kiezen</button>
+          </div>
+          <!-- Stap 2: voorbeeld -->
+          <div id="bi-preview" class="hidden">
+            <p class="text-sm text-slate-600 font-medium" id="bi-summary"></p>
+            <p class="text-xs text-slate-400 mt-0.5 truncate" id="bi-format"></p>
+            <p class="text-xs text-slate-400 mt-1">Vink aan wat je wilt importeren en controleer de categorie. Waarschijnlijk dubbele transacties staan al uit.</p>
+            <div class="flex gap-2 mt-3">
+              <button type="button" onclick="biSelectAll(true)" class="bi-chip pressable">Alles aan</button>
+              <button type="button" onclick="biSelectAll(false)" class="bi-chip pressable">Alles uit</button>
+            </div>
+            <div class="space-y-2 mt-3" id="bi-list"></div>
+          </div>
+          <!-- Stap 3: klaar -->
+          <div id="bi-done" class="hidden text-center py-4">
+            <div class="text-3xl">✅</div>
+            <p class="text-lg font-bold text-slate-900 mt-2" id="bi-done-title"></p>
+            <p class="text-sm text-slate-500 mt-1" id="bi-done-text"></p>
+            <button type="button" onclick="biClose()" class="w-full mt-5 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition">Klaar</button>
+            <button type="button" onclick="biUndo()" class="w-full mt-2 py-3 text-rose-600 font-medium pressable">Import ongedaan maken</button>
+          </div>
+        </div>
+        <div id="bi-footer" class="hidden px-5 pb-6 pt-3 border-t border-slate-100">
+          <p class="text-xs text-slate-400 text-center mb-2 tabular-nums" id="bi-effect"></p>
+          <button type="submit" id="bi-submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25">Importeren</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast fixed left-1/2 bottom-8 z-[60] whitespace-nowrap bg-slate-900 text-white text-sm font-semibold px-5 py-3 rounded-full shadow-2xl pointer-events-none" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
+  <script src="bankimport.js"></script>
   <script src="vendor/supabase.js" defer></script>
   <script src="sync.js" defer></script>
 </body>
