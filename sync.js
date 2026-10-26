@@ -124,7 +124,7 @@
       if (hid.error) throw hid.error;
       if (meta.householdId !== hid.data) { meta = { householdId: hid.data, initialized: false }; writeMeta(); }
       var remote = await fetchRemote();
-      if (meta.initialized) { await pullOrPush(remote); refreshLast(); assistantRefresh(); return; }
+      if (meta.initialized) { await pullOrPush(remote); refreshLast(); assistantRefresh(); setTimeout(inboxAfterLogin, 0); return; }
       var local = localData();
       if (!remote || !hasData(remote.data)) {
         if (hasData(local)) await upload();
@@ -138,7 +138,7 @@
       if (remote && !meta.lastSyncedAt) meta.lastSyncedAt = remote.updated_at;
       meta.initialized = true; writeMeta();
       setStatus('ok');
-      refreshLast(); assistantRefresh();
+      refreshLast(); assistantRefresh(); setTimeout(inboxAfterLogin, 0);
     } catch (e) { fail(e); }
     finally { busy = false; }
   }
@@ -344,6 +344,74 @@
     assistantRefresh();
   };
 
+  // ---- v38: bank-inbox (PDF delen vanaf iPhone via Opdrachten) ----
+  var INBOX_URL = SUPABASE_URL + '/rest/v1/rpc/inbox_upload';
+  var inboxBusy = false, inboxLast = 0, inboxSeen = {};
+  var inboxWanted = /[?&]import=inbox\b/.test(location.search || '');
+  if (inboxWanted) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {} }
+  function iset(text) { var el = $('inbox-status'); if (el) el.textContent = text; }
+  async function inboxRefresh() {
+    if (!client || !user) return;
+    try {
+      var r = await client.rpc('inbox_token_status');
+      if (r.error) throw r.error;
+      var row = (r.data || [])[0];
+      iset(row && row.active ? 'Aan sinds ' + fmtBackup(row.created_at) + (row.last_used_at ? ' · laatst gebruikt ' + fmtBackup(row.last_used_at) : '') : 'Uit. Zet dit aan om bankafschriften (PDF) vanaf je iPhone te delen.');
+    } catch (e) { iset(isMissing(e) ? 'PDF-inbox nog niet ingesteld in Supabase' : 'Status onbekend'); }
+  }
+  function modalOpen() { return !!document.querySelector('.modal.open'); }
+  async function inboxCheck(force) {
+    if (!client || !user || !meta.initialized || inboxBusy || typeof window.biImportInbox !== 'function') return;
+    if (!force && Date.now() - inboxLast < 15000) return;
+    if (!force && modalOpen()) return;
+    inboxBusy = true; inboxLast = Date.now();
+    try {
+      var r = await client.rpc('inbox_list');
+      if (r.error) { if (force && !isMissing(r.error)) toast('Inbox ophalen mislukt'); return; }
+      var items = (r.data || []).filter(function (it) { return force || !inboxSeen[it.id]; });
+      if (!items.length) { if (force) toast('Geen gedeelde PDF\u2019s gevonden'); return; }
+      items.forEach(function (it) { inboxSeen[it.id] = true; });
+      if (modalOpen()) { if (typeof closeModal === 'function') closeModal({ keepScroll: true }); await new Promise(function (res) { setTimeout(res, 220); }); }
+      await window.biImportInbox(items, function (ids) {
+        client.rpc('inbox_delete', { p_ids: ids }).then(function (d) { if (d && d.error) inboxSeen = {}; });
+      });
+    } catch (e) { if (force) toast('Inbox ophalen mislukt'); }
+    finally { inboxBusy = false; }
+  }
+  window.mgInboxCheck = function () { return inboxCheck(true); };
+  window.mgInboxEnable = async function () {
+    if (!client || !user) return;
+    if (!confirm('PDF-inbox aanzetten? Er wordt een nieuwe sleutel gemaakt; een eventuele oude sleutel (en Opdracht) stopt met werken.')) return;
+    var r = await client.rpc('create_inbox_token');
+    if (r.error) { alert(isMissing(r.error) ? 'PDF-inbox nog niet ingesteld in Supabase' : 'Aanzetten mislukt: ' + nlError(r.error)); return; }
+    $('inbox-token').value = r.data;
+    $('inbox-token-wrap').classList.remove('hidden');
+    inboxRefresh();
+  };
+  window.mgInboxCopy = async function (id) {
+    var el = $(id || 'inbox-token'); var v = el && el.value; if (!v) return;
+    try { await navigator.clipboard.writeText(v); } catch (e) { el.select(); try { document.execCommand('copy'); } catch (x) {} }
+    toast('Gekopieerd ✓');
+  };
+  window.mgInboxRevoke = async function () {
+    if (!client || !user || !confirm('PDF-inbox intrekken? De sleutel in je Opdracht werkt daarna niet meer.')) return;
+    var r = await client.rpc('revoke_inbox_token');
+    if (r.error) { alert(isMissing(r.error) ? 'PDF-inbox nog niet ingesteld in Supabase' : 'Intrekken mislukt: ' + nlError(r.error)); return; }
+    $('inbox-token').value = ''; $('inbox-token-wrap').classList.add('hidden');
+    toast('PDF-inbox ingetrokken');
+    inboxRefresh();
+  };
+  function inboxFill() {
+    var u = $('inbox-url'), k = $('inbox-key');
+    if (u) u.value = INBOX_URL;
+    if (k) k.value = SUPABASE_KEY;
+  }
+  function inboxAfterLogin() {
+    inboxRefresh(); inboxFill();
+    if (inboxWanted) { inboxWanted = false; setTimeout(function () { inboxCheck(true); }, 300); }
+    else setTimeout(function () { inboxCheck(false); }, 800);
+  }
+
   window.mgSyncActive = function () { return !!(client && user && meta.initialized); };
   window.mgSyncNow = function () { if (meta.dirty) return safe(upload); return syncNow(); };
 
@@ -370,11 +438,12 @@
       renderUi();
       if (user && (!was || was.id !== user.id)) setTimeout(afterLogin, 0);
     });
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') syncNow(); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { syncNow(); setTimeout(function () { inboxCheck(false); }, 1200); } });
     window.addEventListener('focus', function () { syncNow(); });
     setInterval(function () { if (document.visibilityState === 'visible') syncNow(); }, 60000);
     window.addEventListener('online', function () { if (user) window.mgSyncNow(); });
     window.addEventListener('offline', function () { if (user) setStatus('offline'); });
+    if (inboxWanted) setTimeout(function () { if (!user) toast('Log in via Instellingen om je gedeelde PDF te importeren'); }, 4000);
   }
 
   window.__mgSync = { meta: function () { return meta; }, status: function () { return status; }, syncNow: syncNow, fmtBackup: fmtBackup };

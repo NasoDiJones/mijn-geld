@@ -532,7 +532,7 @@
   function parseIngDetailPdf(lines) {
     const txs = []; let errors = 0;
     const START = /^(details transactie|details van de transactie|detail(s)? de la transaction|details de l'operation|transaction details)$/;
-    const KEY = /^(naar|van|ten gunste van|ten laste van|opdrachtgever|begunstigde|vers|de|en faveur de|a charge de|beneficiaire|donneur d'ordre|to|from|in favour of|mededeling|communication|message|persoonlijke info|info personnelle|personal info|valutadatum|date valeur|value date|verrichtingnummer|verrichtingsnummer|numero d'operation|numero de l'operation|transaction number|iban|bic|referentie|reference|kaartnummer|numero de carte|card number|datum|date|uur|heure|time|plaats|lieu|place)\s*:\s*(.*)$/;
+    const KEY = /^(naar|van|ten gunste van|ten laste van|opdrachtgever|begunstigde|vers|de|en faveur de|a charge de|beneficiaire|donneur d'ordre|to|from|in favour of|mededeling|communication|message|persoonlijke info|info personnelle|personal info|valutadatum|date valeur|value date|verrichtingnummer|verrichtingsnummer|numero d'operation|numero de l'operation|transaction number|iban|bic|referentie|reference|kaartnummer|numero de carte|card number|datum en uur|datum en tijd|date et heure|datum|date|uur|heure|time|tijdstip|tijd|plaats|lieu|place)\s*:\s*(.*)$/;
     const NAMEKEY = /^(naar|van|ten gunste van|ten laste van|opdrachtgever|begunstigde|vers|de|en faveur de|a charge de|beneficiaire|donneur d'ordre|to|from|in favour of)$/;
     const FOOT = /^(dit document werd gegenereerd|ce document a ete genere|this document was generated)|ing belgi[eë] \/ nv|ing belgique|ing belgium sa/;
     let account = '';
@@ -573,13 +573,14 @@
       });
       if (!date || amount === null || !amount) { errors++; continue; }
       const type = rows[0] || '';
-      let name = '', iban = '', medParts = [], entryId = '', valueDate = '', other = [], mode = null;
+      let name = '', iban = '', medParts = [], entryId = '', valueDate = '', other = [], other37 = [], mode = null;
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r]; const nr = norm(row);
         if (nr === norm(type)) { mode = null; continue; } // tweede (uitgebreide) blok begint opnieuw met het type
         const m = nr.match(KEY);
         if (m) {
           const key = m[1]; const val = cleanSpaces(row.slice(row.indexOf(':') + 1));
+          if (/^(datum en uur|datum en tijd|date et heure|tijdstip|tijd)$/.test(key)) other37.push(row); // v37 kende deze labels niet
           mode = null;
           if (NAMEKEY.test(key)) {
             if (!name) {
@@ -591,18 +592,29 @@
           else if (/^iban$/.test(key)) { if (!iban && val) iban = normIban(val); }
           else if (/^(verrichting|numero|transaction number)/.test(key)) entryId = val.replace(/\s+/g, '');
           else if (/^(valutadatum|date valeur|value date)$/.test(key)) valueDate = val;
-          else if (!/^(persoonlijke info|info personnelle|personal info|bic|referentie|reference|kaartnummer|numero de carte|card number|datum|date|uur|heure|time)$/.test(key)) other.push(row);
+          else if (!/^(persoonlijke info|info personnelle|personal info|bic|referentie|reference|kaartnummer|numero de carte|card number|datum en uur|datum en tijd|date et heure|datum|date|uur|heure|time|tijd|tijdstip)$/.test(key)) { other.push(row); other37.push(row); }
           continue;
         }
         if (mode === 'name') { name = row; mode = null; continue; }
         if (mode === 'med') { if (medParts.length < 3 && norm(row) !== norm(medParts[0] || '')) medParts.push(row); continue; }
-        other.push(row);
+        other.push(row); other37.push(row);
       }
       // Kaartbetaling zonder 'Naar:': de eerste gewone tekstregel is meestal de handelaar.
-      if (!name) { const cand = other.find(r => !/:/.test(r) && /[a-z]{3}/i.test(r) && !/^(belgi[eë]|belgique|nederland|deutschland|france|luxembourg)$/i.test(r) && !/^instant op/i.test(r)); if (cand) { name = cand; other = other.filter(r => r !== cand); } }
+      // Importsleutel exact zoals in v37 (zodat eerder geïmporteerde PDF's als dubbel herkend blijven).
+      let keyName = name, keyOther = other37;
+      if (!keyName) { const c37 = other37.find(r => !/:/.test(r) && /[a-z]{3}/i.test(r) && !/^(belgi[eë]|belgique|nederland|deutschland|france|luxembourg)$/i.test(r) && !/^instant op/i.test(r)); if (c37) { keyName = c37; keyOther = other37.filter(r => r !== c37); } }
+      if (!name) {
+        const cand = other.find(r => !/^[A-Za-zÀ-ÿ' ]{2,30}:\s/.test(r) && /[a-z]{3}/i.test(r) && !/^(belgi[eë]|belgique|nederland|deutschland|france|luxembourg)$/i.test(r) && !/^instant op/i.test(r));
+        if (cand) {
+          // 'Betaling met debetkaart nummer … SHELL HAMONT 29/09 om 14.32 uur' → alleen de handelaar
+          const merchant = /kaart|bancontact|maestro|card|carte/i.test(cand) ? (extractName(cand) || cardMerchant(cand)) : '';
+          name = merchant || cand; other = other.filter(r => r !== cand);
+        }
+      }
       const med = dedupeWords(medParts.join(' '));
       txs.push({ date, amount: Math.round(amount * 100) / 100, name, iban, account, accountName: '', entryId, valueDate, currency,
-        text: med || cleanSpaces(other.join(' ')), textLow: type + (med ? '' : '') });
+        text: med || cleanSpaces(other.join(' ')), textLow: type,
+        keyName, keyText: med || cleanSpaces(keyOther.join(' ')) });
     }
     return { txs, errors };
   }
@@ -860,7 +872,8 @@
   function stripBoilerplate(s, name) {
     let t = ' ' + cleanSpaces(s) + ' ';
     t = t.replace(/\b(?:betaling|paiement|payment|geldopneming|retrait|aankoop|achat)\s+(?:met|par|by|via)?\s*(?:de\s+)?(?:debetkaart|kredietkaart|bancontact|maestro|visa|mastercard|carte de d[ée]bit|debit card|kaart|card|carte)\s*(?:nummer|nr\.?|n°|num[ée]ro|number)?\s*[\dX* ]{0,24}/gi, ' ')
-      .replace(/\b(?:Pasvolgnr|Card sequence no\.?|Transactie|Term|Transaction|NR|PAS\d*)\s*:?\s*\S+/gi, ' ')
+      .replace(/\bPAS\d+\b/g, ' ')
+      .replace(/\b(?:Pasvolgnr|Card sequence no\.?|Transactie|Term|Transaction|NR|PAS)\s*:?\s*\S+/gi, ' ')
       .replace(/\b(?:debit|credit) card payment\s*(?:number|no\.?)?\s*[\dX* ]{0,24}/gi, ' ')
       .replace(/\b(?:BEA|GEA|eCom|CCV),?\s/g, ' ').replace(/\s\/(?=\s)/g, ' ')
       .replace(/\bReferentie bank\s*:\s*\S+/gi, ' ')
@@ -886,6 +899,62 @@
     const m = t.match(/(?:bancontact|debetkaart|maestro|kaart|debit card|carte de d[ée]bit)\s+(?:nummer\s+)?(?:[\dX*]{4}[\dX* ]{6,}\s+)?(?:\d{1,2}[-\/.]\d{1,2}(?:[-\/.]\d{2,4})?\s+)?(?:(?:om\s+)?\d{1,2}[.:]\d{2}(?:\s*uur)?\s+)?([A-Za-z].{1,60}?)(?=\s+\d{1,2}[\/.-]\d{1,2}\b|\s*$)/i);
     return m ? cleanSpaces(m[1]) : '';
   }
+  // v38: tijdstippen (14:32, 14:32:05, 14.32 uur, om 14u32, 19h02, 10 30 50) en de transactiedatum zelf horen niet in de omschrijving.
+  // Alleen voor wat je ziet (omschrijving/notitie); de importsleutels blijven op de ruwe bankgegevens gebaseerd.
+  const TIME_HM = '(?:[01]?\\d|2[0-3])';
+  const TIME_RE = new RegExp(
+    '(?:' +
+      '\\b' + TIME_HM + ':[0-5]\\d(?::[0-5]\\d)?(?:\\s*(?:uur|u|h)\\b)?' +          // 14:32, 14:32:05
+      '|\\b' + TIME_HM + '[uh][0-5]\\d(?:m(?:in)?)?\\b' +                          // 14u32, 19h02
+      '|\\b' + TIME_HM + '\\.[0-5]\\d\\s*(?:uur|u|h)\\b' +                         // 14.32 uur
+      '|(?:\\bom|\\bat|à)\\s+' + TIME_HM + '\\.[0-5]\\d(?!\\d)' +                  // om 14.32
+      '|\\b' + TIME_HM + '\\s*(?:uur|u|h)\\b(?=\\s|$|[,.;)])' +                     // 14 uur, 14u
+    ')', 'gi');
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dateVariants(ymd) {
+    if (!ymd) return [];
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dd = [String(d), pad(d)], mm = [String(m), pad(m)], yy = [String(y), String(y).slice(2)];
+    const out = [];
+    dd.forEach(a => mm.forEach(b => ['/', '-', '.'].forEach(sep => { yy.forEach(c => out.push(a + sep + b + sep + c)); out.push(a + sep + b); })));
+    const mons = Object.keys(PDF_MONTHS).filter(k => PDF_MONTHS[k] === m);
+    dd.forEach(a => mons.forEach(mo => { out.push(a + ' ' + mo + ' ' + y); out.push(a + ' ' + mo + '.? ' + y); out.push(a + ' ' + mo); }));
+    return out.sort((a, b) => b.length - a.length);
+  }
+  function stripDateTime(text, dates) {
+    let t = ' ' + String(text || '') + ' ';
+    if (!/\d/.test(t)) return cleanSpaces(t.replace(/\s(?:om|à|uur)\s*$/i, ' '));
+    const X = ' \u0001 ';
+    // gecombineerd: 2026-09-29T14:32:05, 27.02.24/19:44, 29/09/2026-14:32
+    t = t.replace(/\b(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?\b/g, '$1' + X);
+    t = t.replace(new RegExp('(\\d)[\\/\\s-]+(?=' + TIME_HM + ':[0-5]\\d)', 'g'), '$1 ');
+    // ING 'Instant op 29/08 - 10 30 50'
+    t = t.replace(/(\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?)\s*-\s*(?:[01]?\d|2[0-3]) [0-5]\d(?: [0-5]\d)?\b/g, '$1' + X);
+    t = t.replace(/\b(instant)(?:\s+op)?\s+(?:[01]?\d|2[0-3]) [0-5]\d(?: [0-5]\d)?\b/gi, '$1' + X);
+    t = t.replace(TIME_RE, X);
+    // De transactiedatum (en valuta-/aankoopdatum vlak ervoor) die herhaald wordt.
+    const seen = new Set();
+    (dates || []).filter(Boolean).forEach(ymd => dateVariants(ymd).forEach(v => {
+      if (seen.has(v)) return; seen.add(v);
+      const re = new RegExp('(^|[\\s(,;:/-])' + v.replace(/\./g, '\\.').replace(/\\\.\?/g, '\\.?') + '(?=$|[\\s),;:/-])', 'gi');
+      t = t.replace(re, '$1' + X);
+    }));
+    // Voorzetsels vóór een weggehaalde tijd/datum ('om', 'op', 'le', 'à') en scheidingstekens eromheen.
+    for (let k = 0; k < 3; k++) t = t.replace(/(^|\s)(?:om|op|le|on|at|du|van|à|a|(?:datum|date)(?:\s+(?:en|et|and)\s+(?:uur|tijd|heure|time))?|uur|tijd|tijdstip|heure|time)\s*:?\s*(?=\u0001)/gi, '$1');
+    t = t.replace(/\(\s*\u0001\s*\)/g, X)
+      .replace(/[\s,;:\/–-]*\u0001(?:[\s,;:\/–-]*\u0001)*[\s,;:\/–-]*(?:uur\b)?[\s,;:\/–-]*/g, ' ')
+      .replace(/\(\s*\)/g, ' ')
+      .replace(/\s(?:om|à|uur)\s*$/i, ' ')
+      .replace(/[\s,;:\/–-]+$/g, '').replace(/^[\s,;:\/–-]+/g, '');
+    return cleanSpaces(t);
+  }
+  function txDates(tx) {
+    const out = [tx.date];
+    if (tx.valueDate) { const v = parseDate(tx.valueDate, 'dmy'); if (v) out.push(v); }
+    // kaartbetalingen: aankoopdatum ligt vaak 1–4 dagen vóór de boekingsdatum
+    if (tx.date) for (let k = 1; k <= 4; k++) { const d = new Date(tx.date + 'T12:00:00'); d.setDate(d.getDate() - k); out.push(validYmd(d.getFullYear(), d.getMonth() + 1, d.getDate())); }
+    return out;
+  }
   const CASH_RE = /geldopneming|geldopname|geldautomaat|retrait|cash withdrawal|atm\b/i;
   // Maakt van een ruwe bankregel: description (wat in de app komt), note (extra info) en een sleutel voor de tegenpartij.
   function describe(tx) {
@@ -897,7 +966,7 @@
     if (/^\d+$/.test(name)) name = '';
     if (CASH_RE.test(all) && !/^geldop/i.test(name)) name = 'Geldopname' + (name ? ' ' + name : '');
     let note = omschrijvingFrom(text);
-    if (!note) note = cleanText(stripBoilerplate(dedupeWords(text), cleanSpaces(tx.name) || name));
+    if (!note) note = cleanText(stripBoilerplate(dedupeWords(stripDateTime(text, txDates(tx))), cleanSpaces(tx.name) || name));
     note = dedupeWords(note);
     if (note && name && norm(note).startsWith(norm(name))) note = cleanSpaces(note.slice(name.length));
     if (GENERIC.test(note) || /^[\W\d]*$/.test(note) || /^(naar|van|to|from|de|vers|aan)$/i.test(note)) note = '';
@@ -907,12 +976,18 @@
       description = note && !GENERIC.test(note) ? note : (low || note || 'Banktransactie');
       if (description === note) note = '';
     }
+    // v38: tijd en herhaalde datum eruit (sleutel voor categorie-geheugen blijft op de ruwe naam gebaseerd).
+    const dts = txDates(tx);
+    const key = counterpartyKey((name && stripDateTime(name, dts)) || stripDateTime(description, dts) || description, tx.iban);
+    const cleanDesc = stripDateTime(description, dts);
+    if (cleanDesc && /[a-z]/i.test(cleanDesc)) description = cleanDesc;
+    note = stripDateTime(note, dts);
+    if (GENERIC.test(note) || /^[\W\d]*$/.test(note) || /^(instant|naar|van|to|from|de|vers|aan)$/i.test(note) || norm(note) === norm(description)) note = '';
     // Mooier hoofdlettergebruik voor namen in kapitalen ('ALBERT HEIJN 1234' → 'Albert Heijn 1234').
     if (description === description.toUpperCase() && /[A-Z]{3}/.test(description)) {
       description = description.toLowerCase().replace(/(^|[\s\-/&(.])([a-zà-ÿ])/g, (a, p, c) => p + c.toUpperCase()).replace(/\bIng\b/, 'ING');
     }
     description = description.slice(0, 80);
-    const key = counterpartyKey(name || description, tx.iban);
     return { description, note: note.slice(0, 160), key };
   }
   function counterpartyKey(name, iban) {
@@ -962,7 +1037,8 @@
     // Importsleutel: zelfde bankregel = zelfde sleutel, ook bij opnieuw importeren (volgnummer voor identieke regels).
     const seen = {};
     res.txs.forEach(t => {
-      const base = (t.entryId ? 'e:' + t.account + ':' + t.entryId + ':' : '') + t.date + '|' + t.amount.toFixed(2) + '|' + norm(t.name + ' ' + t.text + ' ' + t.textLow).slice(0, 120);
+      const kn = t.keyName !== undefined ? t.keyName : t.name, kt = t.keyText !== undefined ? t.keyText : t.text;
+      const base = (t.entryId ? 'e:' + t.account + ':' + t.entryId + ':' : '') + t.date + '|' + t.amount.toFixed(2) + '|' + norm(kn + ' ' + kt + ' ' + t.textLow).slice(0, 120);
       // Met een volgnummer van de bank is dezelfde sleutel echt dezelfde boeking; zonder volgnummer tellen we identieke regels.
       seen[base] = t.entryId ? 1 : (seen[base] || 0) + 1;
       t.importKey = simpleHash(base) + '-' + seen[base];
@@ -1463,6 +1539,7 @@ function biConfirm(e) {
   biEl('bi-done-text').textContent = lines.join(' · ');
   biStage('done');
   if (typeof haptic === 'function') haptic([10, 40, 10]);
+  biInboxFinish();
   return { imported: added.length, skipped };
 }
 function biUndo() {
@@ -1477,4 +1554,48 @@ function biUndo() {
   closeModal();
   showToast('Import ongedaan gemaakt');
 }
-function biClose() { bankImport = null; closeModal(); }
+function biClose() { biInboxFinish(); bankImport = null; closeModal(); }
+
+// ---------- v38: bank-inbox (PDF gedeeld via iPhone-Opdracht) ----------
+// items: [{ id, filename, data (base64) }]. onFinish(ids) wordt één keer aangeroepen na importeren,
+// annuleren of een leesfout, zodat de PDF's uit de inbox gewist worden.
+var biInbox = null;
+function biInboxFinish() {
+  const ib = biInbox; biInbox = null;
+  if (ib && typeof ib.onFinish === 'function') { try { ib.onFinish(ib.ids); } catch (e) {} }
+}
+function biB64ToBytes(b64) {
+  const bin = atob(String(b64 || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function biImportInbox(items, onFinish) {
+  items = (items || []).filter(it => it && it.data);
+  if (!items.length) return false;
+  openBankImport();
+  biInbox = { ids: items.map(it => it.id), onFinish };
+  biSetError('');
+  const texts = [];
+  try {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i], name = it.filename || 'Gedeelde PDF';
+      let bytes;
+      try { bytes = biB64ToBytes(it.data); } catch (e) { biSetError(`"${name}" kon niet worden gelezen.`); biInboxFinish(); return false; }
+      if (!MGBank.isPdfBytes(bytes.buffer)) { biSetError(`"${name}" is geen geldige PDF.`); biInboxFinish(); return false; }
+      biBusy(true, items.length > 1 ? `Gedeelde PDF's lezen… (${i + 1}/${items.length})` : 'Gedeelde PDF lezen…');
+      let lib;
+      try { lib = await biLoadPdfJs(); }
+      catch (e) { biSetError('De PDF-lezer kon niet worden geladen. Controleer je internetverbinding; de PDF blijft in je inbox staan.'); biInbox = null; return false; }
+      try { texts.push({ name, pdf: await MGBank.pdfExtract(lib, bytes) }); }
+      catch (e) {
+        const pw = e && (e.name === 'PasswordException' || /password/i.test(e.message || ''));
+        biSetError(pw ? `"${name}" is beveiligd met een wachtwoord.` : `"${name}" kon niet als PDF worden gelezen.`);
+        biInboxFinish(); return false;
+      }
+    }
+  } finally { biBusy(false); }
+  const ok = biProcessTexts(texts);
+  if (ok !== true) biInboxFinish(); // fout of onbekend formaat: niet blijven aanbieden
+  return ok === true;
+}
