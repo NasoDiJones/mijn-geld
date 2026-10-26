@@ -2,7 +2,7 @@
 // - Netwerk eerst (max ~3 s) voor de pagina, app.js, styles.css en manifest: updates zijn direct zichtbaar als je online bent.
 // - Cache eerst voor iconen (veranderen zelden).
 // - Offline: alles komt uit de cache.
-const CACHE = 'mijn-geld-v38';
+const CACHE = 'mijn-geld-v39';
 const NETWORK_TIMEOUT_MS = 3000;
 const CORE = ['./', './app.js', './bankimport.js', './sync.js', './vendor/supabase.js', './styles.css', './manifest.webmanifest'];
 const ICONS = ['./icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'];
