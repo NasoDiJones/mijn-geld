@@ -1,4 +1,4 @@
-// Mijn Geld v35: bankbestand importeren (CSV van NL/BE-banken, CAMT.053 XML, MT940).
+// Mijn Geld v35/v37: bankbestand importeren (CSV van NL/BE-banken, CAMT.053 XML, MT940 en sinds v37 ook PDF).
 // Alles gebeurt lokaal in de browser: het bestand wordt alleen gelezen, nooit geüpload of bewaard.
 // Alleen de transacties die je aanvinkt en met 'Importeren' bevestigt, komen in de app (net als handmatig toegevoegde).
 (function (root) {
@@ -432,6 +432,393 @@
     return { format: 'MT940', bank: null, txs: out, errors: 0 };
   }
 
+  // ==================== PDF (v37) ====================
+  // De PDF wordt in de browser gelezen met pdf.js (vendor/pdfjs, pas geladen als je een PDF kiest).
+  // Uit de tekstposities bouwen we regels en kolommen op en daaruit de transacties.
+  const PDF_MONTHS = { jan: 1, januari: 1, january: 1, janv: 1, janvier: 1, feb: 2, febr: 2, februari: 2, february: 2, fev: 2, fevr: 2, fevrier: 2,
+    mrt: 3, maa: 3, maart: 3, mar: 3, march: 3, mars: 3, apr: 4, april: 4, avr: 4, avril: 4, mei: 5, may: 5, mai: 5,
+    jun: 6, juni: 6, june: 6, juin: 6, jul: 7, juli: 7, july: 7, juil: 7, juillet: 7, aug: 8, augustus: 8, august: 8, aout: 8,
+    sep: 9, sept: 9, september: 9, septembre: 9, okt: 10, oktober: 10, oct: 10, october: 10, octobre: 10,
+    nov: 11, november: 11, novembre: 11, dec: 12, december: 12, decembre: 12 };
+  const PDF_WEEKDAY = /^(maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag|ma|di|wo|do|vr|za|zo|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\.?,?$/i;
+  const PDF_DATE_NUM = /^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{4}|\d{2}))?$/;
+  const PDF_DATE_TXT = /^(\d{1,2})\.?\s+([a-z]{3,10})\.?(?:\s+(\d{4}))?$/;
+  // Bedrag met decimale komma (Europees): -1.350,00 | 1 350,00 | € 12,50 | 12,50 EUR | 12,50- | 471,31 +/CREDIT
+  const PDF_AMT = /(^|\s)([-+\u2212]\s?)?(€\s?)?([-+\u2212]\s?)?(\d{1,3}(?:[.\u00a0\u202f ]\d{3})+|\d+),(\d{2})(\s?(?:EUR|€))?(\s?(?:\+\/CREDIT|-\/DEBET|\+\/CR|-\/DB)|\s?[-+](?=\s|$)|\s(?:D|C|DB|CR|Db|Cr|DT|CT)(?=\s|$))?(?=\s|$)/g;
+
+  function pdfYmdFromMeta(s) {
+    const m = String(s || '').match(/(\d{4})(\d{2})(\d{2})/);
+    return m ? validYmd(+m[1], +m[2], +m[3]) : null;
+  }
+  // Datum uit één stukje tekst; zonder jaar wordt het jaar uit het document gebruikt (en nooit ver in de toekomst).
+  function pdfDate(raw, ctx) {
+    let s = norm(raw).replace(/^\(|\)$/g, '');
+    s = s.split(' ').filter(w => !PDF_WEEKDAY.test(w)).join(' ');
+    let m, y = null, mo, d;
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return validYmd(+m[1], +m[2], +m[3]);
+    if ((m = s.match(PDF_DATE_NUM))) { d = +m[1]; mo = +m[2]; if (m[3]) y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; }
+    else if ((m = s.match(PDF_DATE_TXT)) && PDF_MONTHS[m[2]]) { d = +m[1]; mo = PDF_MONTHS[m[2]]; if (m[3]) y = +m[3]; }
+    else if (ctx && ctx.ref && /^(vandaag|aujourd'hui|today)$/.test(s)) return ctx.ref;
+    else if (ctx && ctx.ref && /^(gisteren|hier|yesterday)$/.test(s)) { const t = new Date(ctx.ref + 'T12:00:00'); t.setDate(t.getDate() - 1); return validYmd(t.getFullYear(), t.getMonth() + 1, t.getDate()); }
+    else return null;
+    if (y) return validYmd(y, mo, d);
+    if (!ctx || !ctx.ref) return null;
+    const ry = +ctx.ref.slice(0, 4);
+    let out = validYmd(ry, mo, d);
+    if (out && out > ctx.ref) { const t = new Date(ctx.ref + 'T12:00:00'); t.setDate(t.getDate() + 7); if (out > validYmd(t.getFullYear(), t.getMonth() + 1, t.getDate())) out = validYmd(ry - 1, mo, d); }
+    return out;
+  }
+  function pdfAmounts(text) {
+    const out = []; let m;
+    PDF_AMT.lastIndex = 0;
+    while ((m = PDF_AMT.exec(text))) {
+      const neg = /[-\u2212]/.test((m[2] || '') + (m[4] || '')) || /^\s?(-|-\/DEBET|-\/DB|D|DB|Db|DT)$/.test(m[8] || '');
+      const pos = /\+/.test((m[2] || '') + (m[4] || '')) || /^\s?(\+|\+\/CREDIT|\+\/CR|C|CR|Cr|CT)$/.test(m[8] || '');
+      const v = parseFloat(m[5].replace(/[.\u00a0\u202f ]/g, '') + '.' + m[6]);
+      out.push({ value: v, signed: neg || pos, neg, start: m.index + m[1].length, end: PDF_AMT.lastIndex, euro: !!(m[3] || m[7]) });
+    }
+    return out;
+  }
+
+  // Tekstfragmenten → regels (zelfde hoogte) → cellen (grote horizontale tussenruimte = andere kolom).
+  function pdfLines(doc) {
+    const out = [];
+    (doc.pages || []).forEach((pg, pi) => {
+      const items = (pg.items || []).filter(it => it && it.str && it.str.trim()).map(it => ({ str: it.str, x: +it.x || 0, y: +it.y || 0, w: Math.max(0, +it.w || 0), h: Math.max(4, Math.abs(+it.h || 10)) }));
+      items.sort((a, b) => b.y - a.y || a.x - b.x);
+      const lines = [];
+      items.forEach(it => {
+        let line = null;
+        for (let k = lines.length - 1; k >= 0 && k >= lines.length - 4; k--) {
+          if (Math.abs(lines[k].y - it.y) <= Math.max(2, Math.min(lines[k].h, it.h) * 0.45)) { line = lines[k]; break; }
+        }
+        if (!line) { line = { y: it.y, h: it.h, items: [] }; lines.push(line); }
+        line.items.push(it);
+      });
+      lines.forEach(l => {
+        l.items.sort((a, b) => a.x - b.x);
+        const cells = [];
+        l.items.forEach(it => {
+          const c = cells[cells.length - 1];
+          const gap = c ? it.x - c.x1 : Infinity;
+          if (c && gap < Math.max(4, it.h * 0.9)) {
+            const sp = gap > it.h * 0.12 && !/\s$/.test(c.text) && !/^\s/.test(it.str);
+            c.text += (sp ? ' ' : '') + it.str; c.x1 = Math.max(c.x1, it.x + it.w);
+          } else cells.push({ text: it.str, x0: it.x, x1: it.x + it.w });
+        });
+        cells.forEach(c => { c.text = cleanSpaces(c.text); });
+        const cs = cells.filter(c => c.text);
+        if (cs.length) out.push({ page: pi, y: l.y, h: l.h, cells: cs, text: cs.map(c => c.text).join('  '), width: +pg.width || 600 });
+      });
+    });
+    return out;
+  }
+  function pdfBank(all) {
+    const t = all.toLowerCase();
+    if (/ing belgi[eë]|ing belgium|bbrubebb|home'bank|marnixlaan 24/.test(t)) return 'ING België';
+    if (/ing bank n\.?v\.?|ingbnl2a|mijn ing/.test(t)) return 'ING Nederland';
+    if (/kredbebb|kbc bank/.test(t)) return 'KBC';
+    if (/gkccbebb|belfius/.test(t)) return 'Belfius';
+    if (/gebabebb|bnp paribas fortis/.test(t)) return 'BNP Paribas Fortis';
+    if (/arspbe22|argenta/.test(t)) return 'Argenta';
+    if (/abnanl2a|abn amro/.test(t)) return 'ABN AMRO';
+    if (/rabonl2u|rabobank/.test(t)) return 'Rabobank';
+    if (/bunqnl2a|bunq/.test(t)) return 'bunq';
+    return null;
+  }
+  const IBAN_IN = /\b([A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?)\b/;
+
+  // --- ING België: 'Details transactie' (PDF uit de ING-app, één verrichting per pagina) ---
+  function parseIngDetailPdf(lines) {
+    const txs = []; let errors = 0;
+    const START = /^(details transactie|details van de transactie|detail(s)? de la transaction|details de l'operation|transaction details)$/;
+    const KEY = /^(naar|van|ten gunste van|ten laste van|opdrachtgever|begunstigde|vers|de|en faveur de|a charge de|beneficiaire|donneur d'ordre|to|from|in favour of|mededeling|communication|message|persoonlijke info|info personnelle|personal info|valutadatum|date valeur|value date|verrichtingnummer|verrichtingsnummer|numero d'operation|numero de l'operation|transaction number|iban|bic|referentie|reference|kaartnummer|numero de carte|card number|datum|date|uur|heure|time|plaats|lieu|place)\s*:\s*(.*)$/;
+    const NAMEKEY = /^(naar|van|ten gunste van|ten laste van|opdrachtgever|begunstigde|vers|de|en faveur de|a charge de|beneficiaire|donneur d'ordre|to|from|in favour of)$/;
+    const FOOT = /^(dit document werd gegenereerd|ce document a ete genere|this document was generated)|ing belgi[eë] \/ nv|ing belgique|ing belgium sa/;
+    let account = '';
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      const n = norm(l.text);
+      if (IBAN_IN.test(l.text) && !START.test(n) && !txs.length && /^[A-Z]{2}\d{2}/.test(l.cells[0].text)) account = normIban(l.text.match(IBAN_IN)[1]);
+      if (!START.test(n)) continue;
+      // Rekening: de IBAN boven 'Details transactie' op dezelfde pagina.
+      for (let k = i - 1; k >= 0 && lines[k].page === l.page; k--) {
+        if (/^[A-Z]{2}\d{2}/.test(lines[k].cells[0].text) && IBAN_IN.test(lines[k].text)) { account = normIban(lines[k].text.match(IBAN_IN)[1]); break; }
+      }
+      const block = [];
+      for (let k = i + 1; k < lines.length; k++) {
+        if (lines[k].page !== l.page || START.test(norm(lines[k].text)) || FOOT.test(norm(lines[k].text))) break;
+        block.push(lines[k]);
+      }
+      // Bedrag: eerste regel met een bedrag; datum: linkerkolom (bijv. 'maandag' / '2 mrt 2026').
+      let amount = null, date = null, currency = '', descX = null, ai = -1;
+      for (let k = 0; k < block.length && k < 6; k++) {
+        const am = pdfAmounts(block[k].text);
+        if (am.length && amount === null) {
+          const a = am[am.length - 1]; amount = a.neg ? -a.value : a.value; ai = k;
+          const cm = block[k].text.match(/\b(EUR|USD|GBP|CHF)\b/); currency = cm ? cm[1] : 'EUR';
+          const descCell = block[k].cells.find(c => /^(beschrijving|description|omschrijving)$/i.test(c.text));
+          if (descCell) descX = descCell.x0;
+        }
+        if (!date) for (const c of block[k].cells) { const d = pdfDate(c.text, null); if (d) { date = d; break; } }
+      }
+      if (descX === null) descX = Math.min(...block.map(b => (b.cells[1] || b.cells[0]).x0).filter(isFinite).concat([150]));
+      // Tekst in de rechterkolom (alles behalve datum/weekdag/bedrag), regel per regel.
+      const rows = [];
+      block.forEach((b, k) => {
+        const parts = b.cells.filter(c => c.x0 >= descX - 4).map(c => c.text)
+          .filter(t => !/^(beschrijving|description|omschrijving)$/i.test(t) && !(k === ai && pdfAmounts(t).length && pdfAmounts(t)[0].start === 0 && t.length <= 24));
+        const txt = cleanSpaces(parts.join(' ').replace(new RegExp('(?:^|\\s)-?[\\d.]+,\\d{2}\\s?(?:EUR|€)$'), ''));
+        if (txt) rows.push(txt);
+      });
+      if (!date || amount === null || !amount) { errors++; continue; }
+      const type = rows[0] || '';
+      let name = '', iban = '', medParts = [], entryId = '', valueDate = '', other = [], mode = null;
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r]; const nr = norm(row);
+        if (nr === norm(type)) { mode = null; continue; } // tweede (uitgebreide) blok begint opnieuw met het type
+        const m = nr.match(KEY);
+        if (m) {
+          const key = m[1]; const val = cleanSpaces(row.slice(row.indexOf(':') + 1));
+          mode = null;
+          if (NAMEKEY.test(key)) {
+            if (!name) {
+              let v = val; const ib = v.match(/\s+-\s+([A-Z]{2}\d{2}[A-Z0-9 ]{8,})$/);
+              if (ib) { if (!iban) iban = normIban(ib[1]); v = v.slice(0, ib.index); }
+              if (v) name = v; else mode = 'name';
+            }
+          } else if (/^(mededeling|communication|message)$/.test(key)) { if (!medParts.length) { if (val) medParts.push(val); mode = 'med'; } }
+          else if (/^iban$/.test(key)) { if (!iban && val) iban = normIban(val); }
+          else if (/^(verrichting|numero|transaction number)/.test(key)) entryId = val.replace(/\s+/g, '');
+          else if (/^(valutadatum|date valeur|value date)$/.test(key)) valueDate = val;
+          else if (!/^(persoonlijke info|info personnelle|personal info|bic|referentie|reference|kaartnummer|numero de carte|card number|datum|date|uur|heure|time)$/.test(key)) other.push(row);
+          continue;
+        }
+        if (mode === 'name') { name = row; mode = null; continue; }
+        if (mode === 'med') { if (medParts.length < 3 && norm(row) !== norm(medParts[0] || '')) medParts.push(row); continue; }
+        other.push(row);
+      }
+      // Kaartbetaling zonder 'Naar:': de eerste gewone tekstregel is meestal de handelaar.
+      if (!name) { const cand = other.find(r => !/:/.test(r) && /[a-z]{3}/i.test(r) && !/^(belgi[eë]|belgique|nederland|deutschland|france|luxembourg)$/i.test(r) && !/^instant op/i.test(r)); if (cand) { name = cand; other = other.filter(r => r !== cand); } }
+      const med = dedupeWords(medParts.join(' '));
+      txs.push({ date, amount: Math.round(amount * 100) / 100, name, iban, account, accountName: '', entryId, valueDate, currency,
+        text: med || cleanSpaces(other.join(' ')), textLow: type + (med ? '' : '') });
+    }
+    return { txs, errors };
+  }
+
+  // --- Algemeen: rekeninguittreksel / verrichtingenlijst (datum links, bedrag rechts, omschrijving ertussen of eronder) ---
+  const BAL_START = /(vorig|oud|begin|start|openings?|aanvangs)\s*saldo|saldo\s*(vorig|vorige|begin|start|bij aanvang|oud)|ancien solde|solde (precedent|initial|d'ouverture|de depart)|previous balance|opening balance|old balance|beginsaldo/;
+  const BAL_END = /(nieuw|eind|slot|huidig)\s*saldo|saldo\s*(nieuw|einde|eind)|nouveau solde|solde final|new balance|closing balance|eindsaldo/;
+  const SKIP_LINE = /^(pagina|page|blad|seite)\s*\d|\b(pagina|page|blad)\s*\d+\s*(\/|van|de|of)\s*\d+|^(totaal|total|subtotaal|sous-total|transport|over te dragen|report|a reporter)\b|^(dit document|ce document|this document)|\bbtw be\b|\btva be\b|\brpr\b|\bfsma\b/;
+  // Kopregel van de tabel: zoek de kolomnamen (ook als meerdere kolomnamen in één cel zijn samengevoegd).
+  function pdfFind(l, re) {
+    for (const c of l.cells) {
+      const t = c.text; const m = norm(t).match(re);
+      if (!m) continue;
+      const len = t.length || 1, w = c.x1 - c.x0;
+      return { x0: c.x0 + w * (m.index / len), x1: c.x0 + w * ((m.index + m[0].length) / len), text: m[0] };
+    }
+    return null;
+  }
+  function pdfHeaderInfo(l) {
+    const n = norm(l.text);
+    if (n.length > 160 || pdfAmounts(l.text).length) return null;
+    const hasDate = /\b(datum|boekingsdatum|boekdatum|transactiedatum|verrichtingsdatum|uitvoeringsdatum|date|jour)\b/.test(n);
+    const hasDesc = /omschrijving|beschrijving|mededeling|description|libelle|details|tegenpartij|communication|naam\b/.test(n);
+    const deb = pdfFind(l, /bedrag af(?: \(?debet\)?)?|\b(?:debet|debit|uitgaven|afschrijvingen|sorties)\b|(?:^|\s)af(?=\s|$)/);
+    const cre = pdfFind(l, /bedrag bij(?: \(?credit\)?)?|\b(?:credit|ontvangsten|bijschrijvingen|entrees)\b|(?:^|\s)bij(?=\s|$)/);
+    const amt = pdfFind(l, /\b(?:bedrag|montant|amount)\b(?: \(?(?:eur|€)\)?)?/);
+    const bal = pdfFind(l, /\b(?:saldo|solde|balance)\b/);
+    if (!(hasDate || hasDesc) || !((deb && cre) || amt || bal)) return null;
+    return { deb: deb && cre ? deb : null, cre: deb && cre ? cre : null, amt, bal };
+  }
+  const center = c => (c.x0 + c.x1) / 2;
+  function pdfLineAmounts(l) {
+    const out = [];
+    l.cells.forEach((c, ci) => {
+      pdfAmounts(c.text).forEach(a => {
+        // positie van dit bedrag binnen de cel (bedragen staan meestal rechts uitgelijnd)
+        const len = c.text.length || 1;
+        const x1 = a.end >= len - 1 ? c.x1 : c.x0 + (c.x1 - c.x0) * (a.end / len);
+        const x0 = c.x0 + (c.x1 - c.x0) * (a.start / len);
+        out.push(Object.assign({}, a, { ci, x0, x1, whole: a.start === 0 && a.end >= c.text.replace(/\s?(EUR|€)$/, '').length }));
+      });
+    });
+    return out;
+  }
+  function stripTokens(text) {
+    return cleanSpaces(String(text)
+      .replace(PDF_AMT, ' ')
+      .replace(/\(\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?\)/g, ' '));
+  }
+  function parseGenericPdf(lines, ctx) {
+    const all = lines.map(l => l.text).join('\n');
+    let header = null;
+    const events = []; // {kind:'start'|'end'|'tx', ...}
+    const txs = []; let errors = 0, guessed = 0, cur = null, headingDate = null, account = '';
+    let prevRunBal = null; const balStart = [], balEnd = [];
+    const ymdAll = [];
+    const leftLimit = l => (l.width || 600) * 0.38;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      const n = norm(l.text);
+      if (i > 0 && lines[i - 1].page !== l.page && cur && !cur.pending) cur = null; // nieuwe pagina: geen vervolg van de vorige omschrijving
+      const h = pdfHeaderInfo(l);
+      if (h) { header = h; cur = null; continue; }
+      if (!txs.length && !account) { const m = l.text.match(IBAN_IN); if (m && /rekening|compte|account|iban/i.test(l.text + ' ' + (lines[i - 1] ? lines[i - 1].text : ''))) account = normIban(m[1]); }
+      let amts = pdfLineAmounts(l);
+      // Saldo-regels
+      if (amts.length && (BAL_START.test(n) || BAL_END.test(n) || (/\bsaldo\b|\bsolde\b|\bbalance\b/.test(n) && !pdfDate(l.cells[0].text, ctx) && !(l.cells[1] && pdfDate(l.cells[1].text, ctx))))) {
+        // Eén regel kan zowel 'Vorig saldo' als 'Nieuw saldo' bevatten: neem per trefwoord het eerstvolgende bedrag.
+        const tAmts = pdfAmounts(l.text);
+        const nt = l.text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const found = [];
+        [['start', BAL_START], ['end', BAL_END]].forEach(([kind, re]) => {
+          const m = nt.match(re); if (!m) return;
+          const a = tAmts.find(x => x.start >= m.index + m[0].length);
+          if (a) found.push({ kind, at: m.index, value: Math.round((a.neg ? -a.value : a.value) * 100) / 100 });
+        });
+        if (!found.length) {
+          const a = tAmts[tAmts.length - 1] || amts[amts.length - 1];
+          found.push({ kind: events.some(e => e.kind === 'tx') ? 'end' : 'start', at: 0, value: Math.round((a.neg ? -a.value : a.value) * 100) / 100 });
+        }
+        found.sort((a, b) => a.at - b.at).forEach(f => { if (f.kind === 'start') balStart.push(f.value); else balEnd.push(f.value); if (f.kind === 'start' || !events.some(e => e.kind === 'tx')) events.push(f); else events.push(f); });
+        cur = null; prevRunBal = found[found.length - 1].value; if (found.some(f => f.kind === 'start')) prevRunBal = found.find(f => f.kind === 'start').value; continue;
+      }
+      if (SKIP_LINE.test(n)) { continue; }
+      // Datum links op de regel
+      let lineDate = null, dateCells = 0, dateWhole = false, dateRest = '';
+      let c0 = 0;
+      if (l.cells.length > 1 && /^\d{1,4}\.?$/.test(l.cells[0].text) && l.cells[1].x0 < leftLimit(l)) c0 = 1; // volgnummer vooraan
+      for (let ci = c0; ci < Math.min(c0 + 2, l.cells.length); ci++) {
+        const c = l.cells[ci];
+        if (c.x0 > leftLimit(l)) break;
+        let d = pdfDate(c.text, ctx), rest = '';
+        if (!d) {
+          const words = c.text.split(' ');
+          for (let w = Math.min(4, words.length - 1); w >= 1 && !d; w--) { d = pdfDate(words.slice(0, w).join(' '), ctx); if (d) rest = words.slice(w).join(' '); }
+          if (d && ci > c0) d = null; // tweede datum alleen als hele cel
+        }
+        if (!d) break;
+        if (!lineDate) { lineDate = d; dateWhole = !rest; }
+        if (rest) { dateRest = rest; dateCells = ci + 1; break; }
+        dateCells = ci + 1;
+      }
+      if (lineDate && !dateWhole && /^\d{1,2}[.:]\d{2}$/.test((l.cells[c0].text.split(' ')[0]) || '')) { lineDate = null; dateCells = 0; dateRest = ''; } // '19.02 uur' is een tijd
+      const restCells = () => { const r = l.cells.slice(dateCells).map(c => c.text).filter(t => !pdfDate(t, ctx)); if (dateRest) r.unshift(dateRest); return r; };
+      // Lopend saldo / saldo-kolom eruit
+      let runBal = null;
+      if (header && header.bal && amts.length > 1) {
+        const bi = amts.reduce((best, a, k) => Math.abs(center(a) - center(header.bal)) < Math.abs(center(amts[best]) - center(header.bal)) ? k : best, 0);
+        runBal = amts[bi]; amts = amts.filter((_, k) => k !== bi);
+      }
+      const onlyDate = lineDate && !amts.length && !cleanSpaces(restCells().join(' '));
+      const relHead = !amts.length && l.cells.length === 1 && /^(vandaag|gisteren|aujourd'hui|hier|today|yesterday)$/i.test(l.cells[0].text) ? pdfDate(l.cells[0].text, ctx) : null;
+      if (onlyDate || relHead) { headingDate = lineDate || relHead; cur = null; continue; }
+      if (amts.length && (lineDate || headingDate)) {
+        const a = amts[amts.length - 1];
+        let sign = a.signed ? (a.neg ? -1 : 1) : 0;
+        if (!sign && header && header.deb && header.cre) sign = Math.abs(center(a) - center(header.deb)) <= Math.abs(center(a) - center(header.cre)) ? -1 : 1;
+        if (!sign && runBal && prevRunBal !== null) { const rb = runBal.neg ? -runBal.value : runBal.value; const diff = Math.round((rb - prevRunBal) * 100) / 100; if (Math.abs(Math.abs(diff) - a.value) < 0.005) sign = diff < 0 ? -1 : 1; }
+        const desc = stripTokens(restCells().join(' '));
+        cur = { date: lineDate || headingDate, value: a.value, sign, parts: desc ? [desc] : [], listStyle: !lineDate };
+        txs.push(cur); events.push({ kind: 'tx', tx: cur });
+        if (runBal) prevRunBal = runBal.neg ? -runBal.value : runBal.value;
+        continue;
+      }
+      if (lineDate && dateWhole && !amts.length) { // datum en omschrijving, bedrag op de volgende regel
+        cur = { date: lineDate, value: null, sign: 0, parts: [stripTokens(restCells().join(' '))].filter(Boolean), pending: true };
+        continue;
+      }
+      if (amts.length && cur && cur.pending) {
+        const a = amts[amts.length - 1];
+        cur.value = a.value; cur.sign = a.signed ? (a.neg ? -1 : 1) : (header && header.deb && header.cre ? (Math.abs(center(a) - center(header.deb)) <= Math.abs(center(a) - center(header.cre)) ? -1 : 1) : 0);
+        const d = stripTokens(l.text); if (d) cur.parts.push(d);
+        delete cur.pending; txs.push(cur); events.push({ kind: 'tx', tx: cur });
+        continue;
+      }
+      if (amts.length && !lineDate && !headingDate) { if (txs.length || cur) errors++; continue; }
+      if (cur && !amts.length && cur.parts.length < 8) { const d = stripTokens(l.text); if (d) cur.parts.push(d); }
+    }
+    // Teken: geen +/− en geen af/bij-kolommen → afleiden uit de saldo's, anders uit de omschrijving.
+    const fin = txs.filter(t => t.value !== null && t.value > 0);
+    fin.forEach(t => {
+      if (t.sign) return;
+      guessed++;
+      const s = norm(t.parts.join(' '));
+      t.sign = /\b(van|de la part de|from|storting|ontvangen|bijschrijving|salaris|loon|wedde|terugbetaling|refund|remboursement|rente|interest|credit)\b|^van:|overschrijving van/.test(s) ? 1 : -1;
+    });
+    // Lijst (datum als tussenkop): eerste regel = tegenpartij, de rest = omschrijving.
+    const out = fin.map(t => ({ date: t.date, amount: Math.round(t.sign * t.value * 100) / 100, name: t.listStyle && t.parts.length && !/:/.test(t.parts[0]) ? t.parts[0].slice(0, 80) : '', iban: '', account, accountName: '', entryId: '', currency: 'EUR',
+      text: cleanSpaces((t.listStyle && t.parts.length && !/:/.test(t.parts[0]) ? t.parts.slice(1) : t.parts).join(' ')).slice(0, 400), textLow: '' }));
+    // Saldo-controle per uittreksel: begin + som = eind.
+    const segs = []; let seg = null;
+    events.forEach(e => {
+      if (e.kind === 'start') { seg = { start: e.value, sum: 0, n: 0 }; }
+      else if (e.kind === 'tx') { if (!seg) seg = { start: null, sum: 0, n: 0 }; if (e.tx.value) { seg.sum += e.tx.sign * e.tx.value; seg.n++; } }
+      else if (e.kind === 'end') { if (seg) { seg.end = e.value; segs.push(seg); } seg = null; }
+    });
+    // Alleen saldo's zonder teken? Dan proberen of de check klopt met omgekeerde tekens is niet zinvol; we melden gewoon.
+    let usable = segs.filter(s => s.start !== null && s.end !== undefined && s.n > 0);
+    // Begin- en eindsaldo bovenaan (vóór de transacties): controleer het hele document in één keer.
+    if (!usable.length && balStart.length === 1 && balEnd.length === 1 && fin.length) {
+      usable = [{ start: balStart[0], end: balEnd[0], sum: fin.reduce((a, t) => a + t.sign * t.value, 0), n: fin.length }];
+    }
+    const checks = usable.map(s => ({ start: s.start, end: s.end, sum: Math.round(s.sum * 100) / 100, n: s.n, ok: Math.abs(s.start + s.sum - s.end) < 0.005, diff: Math.round((s.end - s.start - s.sum) * 100) / 100 }));
+    return { txs: out, errors, guessed, balance: checks.length ? checks : null };
+  }
+
+  // doc: { pages: [{ width, height, items: [{ str, x, y, w, h }] }], created: 'D:2026…' }
+  function parsePdf(doc) {
+    const lines = pdfLines(doc);
+    if (!lines.length) return { error: 'Deze PDF bevat geen leesbare tekst (waarschijnlijk een scan of foto). Download bij je bank een PDF-afschrift of een CSV-bestand.' };
+    const all = lines.map(l => l.text).join('\n');
+    const bank = pdfBank(all);
+    // Referentiedatum voor datums zonder jaar: 'gegenereerd op …', anders de aanmaakdatum van de PDF, anders de laatste volledige datum.
+    let ref = null; const g = all.match(/(?:gegenereerd op|genere le|generated on|datum afschrift|date de l'extrait|afgedrukt op|imprime le)\s*:?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/i);
+    if (g) ref = parseDate(g[1], 'dmy');
+    const relative = /^(vandaag|gisteren|aujourd'hui|hier|today|yesterday)$/im.test(lines.map(l => norm(l.text)).join('\n'));
+    if (!ref && relative) ref = pdfYmdFromMeta(doc.created);
+    if (!ref) { const ds = (all.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}\b/g) || []).map(x => parseDate(x, 'dmy')).filter(Boolean).sort(); ref = ds[ds.length - 1] || null; }
+    if (!ref) ref = pdfYmdFromMeta(doc.created);
+    const ctx = { ref };
+    let res, kind;
+    if (/^(details transactie|detail(s)? de la transaction|transaction details)$/m.test(lines.map(l => norm(l.text)).join('\n'))) {
+      res = parseIngDetailPdf(lines); kind = 'transactiedetails';
+    }
+    if (!res || !res.txs.length) { res = parseGenericPdf(lines, ctx); kind = 'afschrift'; }
+    if (!res.txs.length) {
+      return { error: 'In deze PDF zijn geen transacties gevonden. Kies een rekeninguittreksel, een overzicht van je verrichtingen of de transactiedetails uit je bank-app, of download bij je bank een CSV-bestand.' };
+    }
+    return { format: 'PDF', pdfKind: kind, bank, txs: res.txs, errors: res.errors || 0, guessedSigns: res.guessed || 0, balance: res.balance || null };
+  }
+
+  // pdf.js → { pages, created }. lib = window.pdfjsLib (browser) of pdfjs-dist (tests).
+  async function pdfExtract(lib, data) {
+    const task = lib.getDocument({ data: data instanceof Uint8Array ? data : new Uint8Array(data), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, disableAutoFetch: true, disableStream: true, stopAtErrors: false });
+    const pdf = await task.promise;
+    let created = null;
+    try { const md = await pdf.getMetadata(); created = md && md.info && (md.info.CreationDate || md.info.ModDate) || null; } catch (e) { /* geen metadata */ }
+    const pages = [];
+    const max = Math.min(pdf.numPages, 200);
+    for (let p = 1; p <= max; p++) {
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      const view = page.view || [0, 0, 600, 800];
+      pages.push({ width: view[2] - view[0], height: view[3] - view[1], items: tc.items.filter(it => typeof it.str === 'string').map(it => ({ str: it.str, x: it.transform[4] - view[0], y: it.transform[5] - view[1], w: it.width, h: it.height || Math.abs(it.transform[3]) })) });
+      if (page.cleanup) page.cleanup();
+    }
+    try { await pdf.destroy(); } catch (e) {}
+    return { pages, created, numPages: pdf.numPages };
+  }
+  function isPdfBytes(buf) {
+    const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const n = Math.min(b.length, 1024);
+    for (let i = 0; i < n - 4; i++) if (b[i] === 0x25 && b[i + 1] === 0x50 && b[i + 2] === 0x44 && b[i + 3] === 0x46 && b[i + 4] === 0x2D) return true;
+    return false;
+  }
+
   // ==================== OMSCHRIJVING & TEGENPARTIJ ====================
   // Haal de tegenpartij uit vrije tekst: 'Naar: X - BE..', 'Van: X', 'Naam: X', '/NAME/X/', kaartbetalingen, ABN 'BEA'.
   function extractName(text) {
@@ -550,11 +937,20 @@
     let res;
     if (fmt === 'camt') res = parseCamt(text);
     else if (fmt === 'mt940') res = parseMt940(text);
-    else if (fmt === 'pdf') return { error: 'Dit is een PDF. Download je afschrift als CSV (of CAMT.053/MT940) in plaats van PDF.' };
+    else if (fmt === 'pdf') return { error: 'Dit is een PDF; die wordt apart gelezen. Probeer het bestand opnieuw te kiezen.' };
     else if (fmt === 'zip') return { error: 'Dit lijkt een Excel- of zip-bestand. Kies bij je bank CSV als bestandsformaat.' };
     else if (fmt === 'xml-unknown') return { error: 'Dit XML-bestand is geen CAMT.053-rekeningafschrift.' };
     else res = parseCsvText(text, forcedMap);
     if (res.error || res.needsMapping) return res;
+    return finalize(res);
+  }
+  // PDF: zelfde nabewerking als CSV (omschrijving, eigen rekeningen, importsleutels).
+  function parsePdfDoc(doc) {
+    const res = parsePdf(doc);
+    if (res.error) return res;
+    return finalize(res);
+  }
+  function finalize(res) {
     // Alleen euro's: transacties in een andere munt worden overgeslagen (worden in de preview gemeld).
     const foreign = res.txs.filter(t => t.currency && t.currency !== 'EUR' && /^[A-Z]{3}$/.test(t.currency));
     res.txs = res.txs.filter(t => !foreign.includes(t));
@@ -570,6 +966,9 @@
       // Met een volgnummer van de bank is dezelfde sleutel echt dezelfde boeking; zonder volgnummer tellen we identieke regels.
       seen[base] = t.entryId ? 1 : (seen[base] || 0) + 1;
       t.importKey = simpleHash(base) + '-' + seen[base];
+      // v37: banksleutel (rekening + verrichtingnummer + datum + bedrag): herkent dezelfde boeking uit CSV én PDF.
+      const vr = (String(t.text + ' ' + t.textLow).match(/Verrichting(?:s)?nummer\s*:?\s*(\d+)/i) || [])[1] || (String(t.entryId || '').match(/\d+/g) || []).pop() || '';
+      t.bankKey = vr && t.account ? 'b' + simpleHash(t.account + '|' + String(+vr) + '|' + t.date + '|' + t.amount.toFixed(2)) : '';
     });
     return res;
   }
@@ -605,9 +1004,9 @@
   }
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseText, parseCsv, parseCsvText, parseAmount, parseDate, detectDelimiter, decodeBytes, extractName, describe, counterpartyKey, matchRule, detectFormat, SAVINGS_RE, RULES, norm, mapColumns, rowsToTransactions };
+    module.exports = { parsePdf, parsePdfDoc, pdfExtract, pdfLines, pdfDate, pdfAmounts, isPdfBytes, parseText, parseCsv, parseCsvText, parseAmount, parseDate, detectDelimiter, decodeBytes, extractName, describe, counterpartyKey, matchRule, detectFormat, SAVINGS_RE, RULES, norm, mapColumns, rowsToTransactions };
   }
-  root.MGBank = { parseText, parseCsv, parseAmount, parseDate, decodeBytes, extractName, describe, counterpartyKey, matchRule, SAVINGS_RE, norm, rowsToTransactions, mappingComplete };
+  root.MGBank = { parsePdfDoc, pdfExtract, isPdfBytes, parseText, parseCsv, parseAmount, parseDate, decodeBytes, extractName, describe, counterpartyKey, matchRule, SAVINGS_RE, norm, rowsToTransactions, mappingComplete };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 // ==================== SCHERM: BANKBESTAND IMPORTEREN ====================
@@ -652,26 +1051,69 @@ function biReadFile(file) {
     r.readAsArrayBuffer(file);
   });
 }
+// v37: pdf.js pas laden als er een PDF gekozen wordt (lokaal in vendor/pdfjs, geen CDN).
+var biPdfLibPromise = null;
+function biLoadPdfJs() {
+  if (window.pdfjsLib && window.pdfjsLib.getDocument) return Promise.resolve(window.pdfjsLib);
+  if (biPdfLibPromise) return biPdfLibPromise;
+  biPdfLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'vendor/pdfjs/pdf.min.js';
+    s.async = true;
+    s.onload = () => {
+      const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
+      if (!lib || !lib.getDocument) { biPdfLibPromise = null; reject(new Error('pdfjs')); return; }
+      lib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+      resolve(lib);
+    };
+    s.onerror = () => { biPdfLibPromise = null; s.remove(); reject(new Error('pdfjs-load')); };
+    document.head.appendChild(s);
+  });
+  return biPdfLibPromise;
+}
+function biBusy(on, text) {
+  const el = biEl('bi-busy');
+  if (el) { el.textContent = text || ''; el.classList.toggle('hidden', !on); }
+  const btn = document.querySelector('#bi-intro button[onclick="biPickFile()"]');
+  if (btn) { btn.disabled = !!on; btn.classList.toggle('opacity-50', !!on); }
+}
 async function biHandleFiles(input) {
   const files = Array.from((input && input.files) || []);
   if (input) input.value = '';
   if (!files.length) return;
   biSetError('');
   const texts = [];
-  for (const f of files) {
-    if (f.size > BI_MAX_BYTES) { biSetError(`"${f.name}" is te groot (max. 15 MB).`); return; }
-    try { texts.push({ name: f.name, text: MGBank.decodeBytes(await biReadFile(f)) }); }
-    catch (e) { biSetError(`"${f.name}" kon niet worden gelezen.`); return; }
-  }
+  try {
+    for (const f of files) {
+      if (f.size > BI_MAX_BYTES) { biSetError(`"${f.name}" is te groot (max. 15 MB).`); return; }
+      let buf;
+      try { buf = await biReadFile(f); }
+      catch (e) { biSetError(`"${f.name}" kon niet worden gelezen.`); return; }
+      if (MGBank.isPdfBytes(buf) || /\.pdf$/i.test(f.name)) {
+        if (!MGBank.isPdfBytes(buf)) { biSetError(`"${f.name}" is geen geldige PDF.`); return; }
+        biBusy(true, files.length > 1 ? `PDF's lezen… (${texts.length + 1}/${files.length})` : 'PDF lezen…');
+        let lib;
+        try { lib = await biLoadPdfJs(); }
+        catch (e) { biSetError('De PDF-lezer kon niet worden geladen. Controleer je internetverbinding en probeer het opnieuw.'); return; }
+        try { texts.push({ name: f.name, pdf: await MGBank.pdfExtract(lib, new Uint8Array(buf)) }); }
+        catch (e) {
+          const pw = e && (e.name === 'PasswordException' || /password/i.test(e.message || ''));
+          biSetError(pw ? `"${f.name}" is beveiligd met een wachtwoord. Bewaar het afschrift zonder wachtwoord en probeer opnieuw.` : `"${f.name}" kon niet als PDF worden gelezen (beschadigd of onbekend formaat).`);
+          return;
+        }
+      } else texts.push({ name: f.name, text: MGBank.decodeBytes(buf) });
+    }
+  } finally { biBusy(false); }
   biProcessTexts(texts);
 }
 // texts: [{ name, text }]. Los aan te roepen (ook vanuit tests).
 function biProcessTexts(texts) {
   const results = [];
   for (const t of texts) {
-    const res = MGBank.parseText(t.text);
+    const res = t.pdf ? MGBank.parsePdfDoc(t.pdf) : MGBank.parseText(t.text);
     if (res.error) { biSetError(`${t.name}: ${res.error}`); return false; }
     if (res.needsMapping) {
+      if (t.pdf) { biSetError(`${t.name}: in deze PDF zijn geen transacties gevonden.`); return false; }
       if (texts.length > 1) { biSetError(`${t.name}: dit formaat werd niet herkend. Kies dit bestand apart om de kolommen zelf aan te wijzen.`); return false; }
       biOpenMapping(t, res);
       return 'mapping';
@@ -683,15 +1125,17 @@ function biProcessTexts(texts) {
 }
 function biFinishParse(results) {
   const txs = [];
-  let foreign = 0, unreadable = 0;
-  const formats = new Set();
-  results.forEach(({ res }) => {
-    foreign += res.foreign || 0; unreadable += res.errors || 0;
+  let foreign = 0, unreadable = 0, guessed = 0;
+  const formats = new Set(), balance = [];
+  results.forEach(({ name, res }) => {
+    foreign += res.foreign || 0; unreadable += res.errors || 0; guessed += res.guessedSigns || 0;
     formats.add(res.bank ? `${res.format} (${res.bank})` : res.format);
+    if (res.balance) balance.push(...res.balance);
+    res.txs.forEach(t => { t.file = name; });
     txs.push(...res.txs);
   });
   if (!txs.length) { biSetError('Er zijn geen transacties in dit bestand gevonden.' + (unreadable ? ` (${unreadable} regels konden niet worden gelezen.)` : '')); biStage('intro'); return; }
-  biBuildPreview(txs, { formats: [...formats], foreign, unreadable, files: results.map(r => r.name) });
+  biBuildPreview(txs, { formats: [...formats], foreign, unreadable, guessed, balance, files: results.map(r => r.name) });
 }
 
 // ---------- Kolommen zelf aanwijzen ----------
@@ -787,6 +1231,8 @@ function biBuildPreview(rawTxs, meta) {
     if (!t.cpKey && t.description && !(dk in memDesc)) memDesc[dk] = t.category;
   });
   const existingKeys = new Set(state.transactions.map(t => t.importKey).filter(Boolean));
+  const existingBankKeys = new Set(state.transactions.map(t => t.bankKey).filter(Boolean));
+  const seenBankKeys = new Set();
   const existing = state.transactions.map(t => ({ t, ymd: txYmd(t), used: false }));
   const period = recurringPeriod();
   const claimedRec = new Set();
@@ -795,14 +1241,15 @@ function biBuildPreview(rawTxs, meta) {
   const rows = [];
   // Oud → nieuw verwerken, zodat 'dubbel' en vaste lasten voorspelbaar worden toegewezen.
   [...rawTxs].sort((a, b) => a.date.localeCompare(b.date)).forEach(r => {
-    if (seenKeys.has(r.importKey)) { fileDups++; return; }
+    if (seenKeys.has(r.importKey) || (r.bankKey && seenBankKeys.has(r.bankKey))) { fileDups++; return; }
     seenKeys.add(r.importKey);
+    if (r.bankKey) seenBankKeys.add(r.bankKey);
     const type = r.amount < 0 ? 'expense' : 'income';
     const amount = Math.round(Math.abs(r.amount) * 100) / 100;
-    const row = { i: rows.length, sel: true, date: r.date, amount, type, description: r.description, note: r.note, key: r.key, importKey: r.importKey,
+    const row = { i: rows.length, sel: true, date: r.date, amount, type, description: r.description, note: r.note, key: r.key, importKey: r.importKey, bankKey: r.bankKey || '', file: r.file || '',
       category: null, catSource: '', potId: null, flags: [], dup: null, recurringId: null, recName: '', manualCat: false };
     // 1. Dubbel?
-    if (existingKeys.has(r.importKey)) row.dup = 'Al eerder geïmporteerd';
+    if (existingKeys.has(r.importKey) || (r.bankKey && existingBankKeys.has(r.bankKey))) row.dup = 'Al eerder geïmporteerd';
     else {
       const cands = existing.filter(x => !x.used && x.t.type === type && Math.abs(x.t.amount - amount) < 0.005);
       let hit = null;
@@ -817,8 +1264,13 @@ function biBuildPreview(rawTxs, meta) {
         if (d === 0 && sim) { hit = [x, 'Staat al in de app (zelfde dag, bedrag en omschrijving)']; break; }
         if (d <= 3 && sim && !hit) hit = [x, 'Lijkt al in de app te staan'];
       }
+      // Zelfde boeking in een ander gekozen bestand (bijv. CSV én PDF tegelijk)?
+      if (!hit) {
+        const other = rows.find(o => o.file !== row.file && o.type === type && Math.abs(o.amount - amount) < 0.005 && biDayDiff(o.date, r.date) <= 1 && (biSimilar(o.description, r.description) || (r.note && biSimilar(o.description, r.note))));
+        if (other) { row.dup = `Staat ook in ${other.file || 'een ander bestand'}`; }
+      }
       if (hit) { hit[0].used = true; row.dup = hit[1] + ` (${formatShortDate(hit[0].ymd)}: ${hit[0].t.description || hit[0].t.category})`; }
-      else {
+      else if (!row.dup) {
         const sameDay = cands.find(x => x.ymd === r.date);
         if (sameDay) row.flags.push(`Zelfde bedrag op deze dag staat al in de app (“${sameDay.t.description || sameDay.t.category}”) – controleer even`);
       }
@@ -897,6 +1349,19 @@ function biRenderPreview() {
   if (meta.foreign) parts.push(`${meta.foreign} in vreemde munt overgeslagen`);
   if (meta.unreadable) parts.push(`${meta.unreadable} onleesbare regels`);
   biEl('bi-summary').textContent = parts.join(' · ');
+  // v37: saldo-controle (PDF-afschriften met begin- en eindsaldo) en gegokte tekens.
+  const bal = biEl('bi-balance');
+  if (bal) {
+    const msgs = [], b = meta.balance || [];
+    if (b.length) {
+      const bad = b.filter(x => !x.ok);
+      if (!bad.length) msgs.push(`✓ Saldo-controle klopt: ${formatMoney(b[0].start)} → ${formatMoney(b[b.length - 1].end)}`);
+      else msgs.push(`⚠︎ Saldo-controle klopt niet (verschil ${formatMoney(Math.abs(bad[0].diff))}). Misschien is een regel niet goed gelezen; controleer de lijst.`);
+    }
+    if (meta.guessed) msgs.push(`⚠︎ Bij ${meta.guessed} ${meta.guessed === 1 ? 'regel' : 'regels'} stond niet of het af of bij was; controleer Uitgave/Inkomst.`);
+    bal.textContent = msgs.join(' ');
+    bal.className = msgs.length ? ('text-xs mt-1 ' + (msgs.some(m => m.startsWith('⚠')) ? 'bi-warn' : 'bi-info')) : 'hidden';
+  }
   biEl('bi-format').textContent = `Bestand: ${meta.files.join(', ')} · ${meta.formats.join(', ')}`;
   biEl('bi-list').innerHTML = rows.map(biRowHtml).join('');
   biUpdateCount();
@@ -972,6 +1437,7 @@ function biConfirm(e) {
     const tx = { id: uid(), type: r.type, amount: r.amount, description: r.description, category: r.category || biDefaultCategory(r.type), potId,
       date: new Date(y, m - 1, d, 12, 0, 0).toISOString(), source: 'import', importKey: r.importKey, cpKey: r.key || '', importedAt: now, importBatch: batch };
     if (r.note) tx.bankNote = r.note;
+    if (r.bankKey) tx.bankKey = r.bankKey;
     if (r.recurringId && curPeriod) {
       const rec = state.recurring.find(x => x.id === r.recurringId);
       const due = rec ? recurringOccurrence(rec, period) : null;

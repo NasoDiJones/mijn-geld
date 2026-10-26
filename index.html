@@ -1055,10 +1055,13 @@
             <p class="text-sm text-slate-500">Kies een export van je bank. Je ziet eerst een overzicht en kiest zelf wat erin komt. Het bestand wordt alleen op dit toestel gelezen en niet geüpload of bewaard.</p>
             <button type="button" onclick="biPickFile()" class="w-full mt-4 bg-brand-600 hover:bg-brand-700 text-white font-semibold py-4 rounded-2xl pressable transition shadow-lg shadow-brand-500/25">📄 Kies bestand</button>
             <input type="file" id="bank-file" multiple class="hidden" onchange="biHandleFiles(this)">
+            <p id="bi-busy" class="hidden text-sm text-slate-500 mt-3 text-center">PDF lezen…</p>
             <p id="bi-error" class="hidden bi-error"></p>
             <div class="bg-slate-50 rounded-2xl p-4 mt-4 text-sm text-slate-600 bi-help">
               <p class="font-semibold text-slate-800">Welke bestanden?</p>
-              <p class="mt-1">CSV van o.a. ING (NL en BE), Rabobank, ABN AMRO (TXT), bunq, KBC, Belfius, BNP Paribas Fortis en Argenta. Ook CAMT.053 (XML) en MT940. Geen PDF: kies bij je bank <b>CSV</b> als formaat. Herkent de app je bestand niet, dan wijs je zelf de kolommen aan.</p>
+              <p class="mt-1">CSV van o.a. ING (NL en BE), Rabobank, ABN AMRO (TXT), bunq, KBC, Belfius, BNP Paribas Fortis en Argenta. Ook CAMT.053 (XML), MT940 en <b>PDF</b>: de transactiedetails uit de ING-app (België), rekeninguittreksels en lijsten met verrichtingen. Je kunt meerdere PDF's tegelijk kiezen. Herkent de app je CSV niet, dan wijs je zelf de kolommen aan.</p>
+              <p class="font-semibold text-slate-800 mt-3">PDF uit de ING-app (België)</p>
+              <p class="mt-1">Open een verrichting, deel of bewaar ze als PDF in de app Bestanden en kies ze hier (ook meerdere tegelijk). Een PDF die een scan of foto is, kan niet gelezen worden.</p>
               <p class="font-semibold text-slate-800 mt-3">CSV downloaden bij ING</p>
               <p class="mt-1"><b>ING België:</b> open je rekening in ING Home'Bank of de ING Banking-app en zoek de optie om je verrichtingen te downloaden of exporteren. Kies <b>CSV</b>.</p>
               <p class="mt-1"><b>ING Nederland:</b> in Mijn ING kies je ‘Af- en bijschrijvingen downloaden’ met als formaat <b>(punt)kommagescheiden CSV</b>. Dat gaat het makkelijkst via de website; in de app kun je vaak alleen een PDF downloaden.</p>
@@ -1084,6 +1087,7 @@
           <div id="bi-preview" class="hidden">
             <p class="text-sm text-slate-600 font-medium" id="bi-summary"></p>
             <p class="text-xs text-slate-400 mt-0.5 truncate" id="bi-format"></p>
+            <p class="hidden" id="bi-balance"></p>
             <p class="text-xs text-slate-400 mt-1">Vink aan wat je wilt importeren en controleer de categorie. Waarschijnlijk dubbele transacties staan al uit.</p>
             <div class="flex gap-2 mt-3">
               <button type="button" onclick="biSelectAll(true)" class="bi-chip pressable">Alles aan</button>

@@ -2,15 +2,18 @@
 // - Netwerk eerst (max ~3 s) voor de pagina, app.js, styles.css en manifest: updates zijn direct zichtbaar als je online bent.
 // - Cache eerst voor iconen (veranderen zelden).
 // - Offline: alles komt uit de cache.
-const CACHE = 'mijn-geld-v36';
+const CACHE = 'mijn-geld-v37';
 const NETWORK_TIMEOUT_MS = 3000;
 const CORE = ['./', './app.js', './bankimport.js', './sync.js', './vendor/supabase.js', './styles.css', './manifest.webmanifest'];
 const ICONS = ['./icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'];
+// v37: PDF-lezer (pdf.js + worker). Wordt bij installatie op de achtergrond bewaard, zodat PDF's ook offline werken.
+const PDFJS = ['./vendor/pdfjs/pdf.min.js', './vendor/pdfjs/pdf.worker.min.js'];
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE)
-      .then(cache => cache.addAll([...CORE, ...ICONS].map(url => new Request(url, { cache: 'reload' }))))
+      .then(cache => cache.addAll([...CORE, ...ICONS].map(url => new Request(url, { cache: 'reload' })))
+        .then(() => Promise.all(PDFJS.map(url => cache.add(new Request(url, { cache: 'reload' })).catch(() => {})))))
       .then(() => self.skipWaiting())
   );
 });
@@ -90,7 +93,7 @@ self.addEventListener('fetch', event => {
 
   if (req.mode === 'navigate' || path === '' || path === 'index.html') {
     event.respondWith(networkFirst(req, new URL('./', scope).href));
-  } else if (path.startsWith('icons/')) {
+  } else if (path.startsWith('icons/') || path.startsWith('vendor/pdfjs/')) {
     event.respondWith(cacheFirst(req));
   } else {
     event.respondWith(networkFirst(req, url.origin + url.pathname));
